@@ -36,10 +36,10 @@
     Wire.beginTransmission(TPSADDR);
     Wire.write(TPS_ACTIVE_PDO_CONTRACT);
     Wire.endTransmission(false);
-    Wire.requestFrom((uint8_t)TPSADDR, (uint8_t)6); //El total del registro son 6 bytes
-    if (Wire.available() >= 6) {
+    Wire.requestFrom((uint8_t)TPSADDR, (uint8_t)7); //El total del registro son 6 bytes
+    if (Wire.available() >= 7) {
         uint8_t length = Wire.read();  // El primer byte devuelto por los chips de TI es siempre la longitud del bloque
-        if (length != 5) return false; // Error: el registro 0x34 no tiene el tamaño esperado
+        if (length != 6) return false; // Error: el registro 0x34 no tiene el tamaño esperado
         uint8_t b0 = Wire.read(); //PDO activo LSB
         uint8_t b1 = Wire.read(); //...
         uint8_t b2 = Wire.read(); //...
@@ -108,87 +108,161 @@ Siglas de la figura == S: Start, Sr: Repeated Start, Wr: Write, Rd: Read, A: Ack
     }
     return (Wire.endTransmission() == 0);
   }
-
-  bool TPS26750::sendCommand4CC(const char* command) {
-      uint8_t cmdBytes[4];
-      memcpy(cmdBytes, command, 4);
-
-      //Escribimos el comando de 4 letras en el registro de comandos (0x08)
-      if (!TPSnBytesWrite(TPSADDR, TPS_COMMAND_I2C1, cmdBytes, 4)) return false;
-
-      //El comando se ha ejecutado cuando el registro vuelve a 0
-      uint8_t checkCmd[4];
-      uint32_t startTime = millis();
-      while (millis() - startTime < 1000) { // Timeout de seguridad de 1 segundo
-          delay(10);
-          if (TPSnBytesRead(TPSADDR, TPS_COMMAND_I2C1, checkCmd, 4)) {
-              if (checkCmd[0] == 0 && checkCmd[1] == 0 && checkCmd[2] == 0 && checkCmd[3] == 0) {
-                  return true; // Comando procesado exitosamente por el chip
-              }
-          }
-      }
-      return false; // Error por Timeout
-  }
 //---------------------------------------------------------------------------------------------------//
 /* Función de carga de configuración del TPS. Necesita el archivo de configuración para funcionar
-taltal
+El funcionamiento se encuentra detallado en el host manual. Los pasos son los siguientes: 
+  - Los cambios se realizan en modo PTCH. Una vez en modo PTCH, el TPS indica cuando esta listo
+  - El host envía los datos en uno o varios comandos de i2c. Una vez terminado se indica vía PBMc.
 */
-  bool TPS26750::loadConfig() {
-      uint8_t mode[4];
-      
-      // 1. Leer el modo actual. Si ya está en modo "APP ", no hace falta parchear.
-      if (!TPSnBytesRead(TPSADDR, TPS_MODE, mode, 4)) return false;
-      if (memcmp(mode, "APP ", 4) == 0) return true; 
-      
-      // Si estás usando la Opción A, asegúrate de haber mapeado tps_patch_data y PATCH_SIZE
-      uint32_t patchSize = PATCH_SIZE; 
-      
-      // 2. Preparar parámetros para iniciar la descarga del parche (PBMs)
-      uint8_t pbms_params[6];
-      pbms_params[0] = (patchSize & 0xFF);
-      pbms_params[1] = ((patchSize >> 8) & 0xFF);
-      pbms_params[2] = ((patchSize >> 16) & 0xFF);
-      pbms_params[3] = ((patchSize >> 24) & 0xFF);
-      pbms_params[4] = PATCH_I2C_ADDR; // Dirección virtual temporal (ej. 0x21)
-      pbms_params[5] = 0x32;           // Timeout estándar
-      
-      // Escribir parámetros en DATA1 y ejecutar comando "PBMs"
-      if (!TPSnBytesWrite(TPSADDR, TPS_DATA1, pbms_params, 6)) return false;
-      if (!sendCommand4CC("PBMs")) return false; // Iniciar secuencia de parche
+//----------------------------------Fuente-----------------------------------------------------------//
+  /*Registros CMD1/DATA1 y bit ReadyforPatch P12-13.
+  Registro MODE P17.
+  Formato 4CC tabla 3-1 P43.
+  PBMs - Start Patch Burst Download P48.
+  PBMc - Patch Burst Download complete P49-51.
+  PBMe - End Patch Burst Download P52.
+  Flujo completo en P52-57.
+  GO2P - Go to Patch Mode P58
+  Resumen en P61.*/
+//-----------------------------------Siglas---------------------------------------------------------//
+/* 4CC - Four Character Code -> Codifican acciones
+   PBM - Patch Burst Mode -> Mejora la velocidad al cargar los datos
+   CMD - Command -> Se escriben códigos de cuatro carácteres para ejecutar una tarea
+*/
 
-      delay(10); // Pequeña pausa para que el TPS procese la transición a modo descarga
+  bool TPS26750::sendCommand4CC(const char* command) {
+    //P52. Si tiene datos de entrada o salida se debe escribir/leer otros registros
+      uint8_t cmdBytes[4];
+      memcpy(cmdBytes, command, 4);
+      if (!TPSnBytesWrite(TPSADDR, TPS_COMMAND_I2C1, cmdBytes, 4)) return false;
 
-      // 3. Transmisión del firmware en bloques desde la Flash (PROGMEM)
-      uint32_t bytesSent = 0;
-      const uint8_t blockSize = 64; 
-      uint8_t chunkBuffer[blockSize];
+      return waitCmd1Complete(5000); 
+  }
 
-      while (bytesSent < patchSize) {
-          uint8_t currentChunkSize = min((uint32_t)blockSize, patchSize - bytesSent);
-          
-          // Copiar de Flash a RAM local en la Teensy
-          memcpy_P(chunkBuffer, &tps_patch_data[bytesSent], currentChunkSize);
-          
-          // Enviar bloque a la dirección virtual de descarga
-          Wire.beginTransmission(PATCH_I2C_ADDR);
-          Wire.write(chunkBuffer, currentChunkSize);
-          if (Wire.endTransmission() != 0) {
-              sendCommand4CC("PBMe"); // Error: Forzar salida de modo descarga si falla
-              return false;
-          }
-          bytesSent += currentChunkSize;
-          delayMicroseconds(500); // Pequeño respiro para el bus
-      }
+  bool TPS26750::waitCmd1Complete(uint32_t timeoutMs) {
+    // TRM pág. 52: "repeatedly read the four byte content of CmdX register
+    // until it reads 0x00 ... or '!CMD'"
+    uint32_t start = millis();
+    uint8_t cmd[4];
+    while (true) {
+        if (!TPSnBytesRead(TPSADDR, TPS_COMMAND_I2C1, cmd, 4)) return false;
+        if (memcmp(cmd, "\0\0\0\0", 4) == 0) return true;   // completado con éxito
+        if (memcmp(cmd, "!CMD", 4) == 0) return false;      // comando rechazado
+        if (millis() - start > timeoutMs) return false;
+        delay(2);
+    } ;
+}
 
-      // 4. Finalizar y verificar la integridad del parche (PBMc)
-      if (!sendCommand4CC("PBMc")) return false; 
+bool TPS26750::waitReadyForPatch(uint32_t timeoutMs) {
+    // TRM P52: 1.The device generates an I2C interrupt, INT_EVENT.ReadyForPatch, indicating that it’s ready for patch. The
+    //host shall start the patch download process only after receiving this notification from the device.
+    //(bit ReadyForPatch, INT_EVENT1 byte 11 / bit1 — ver Tabla 2-6/2-7, pág. 19)
+    uint8_t events[11];
+    uint32_t start = millis(); //Tiempo desde que comienza el programa (Similar getTick())
+    while (millis() - start < timeoutMs) {
+        if (!TPSnBytesRead(TPSADDR, TPS_INT_EVENT1, events, 11)) return false;
+        if (events[10] & 0x02) { // ReadyForPatch
+            uint8_t clear[11] = {0};
+            clear[10] = 0x02;
+            TPSnBytesWrite(TPSADDR, TPS_INT_CLEAR1, clear, 11);
+            return true;
+        }
+        delay(5);
+    }
+    Serial.println("Tiempo de espera expirado. Error en la carga de configuración.");
+    return false; // timeout esperando ReadyForPatch
+}
 
-      // Esperar a que el chip procese el firmware, verifique el CRC y se reinicie en modo APP
-      delay(100); 
-      
-      // 5. Confirmación final de que el modo cambió con éxito a "APP "
-      if (TPSnBytesRead(TPSADDR, TPS_MODE, mode, 4)) {
-          return (memcmp(mode, "APP ", 4) == 0);
-      }
+bool TPS26750::waitForMode(const char* targetMode, uint32_t timeoutMs) {
+    uint8_t mode[4];
+    uint32_t start = millis();
+    do {
+        if (!TPSnBytesRead(TPSADDR, TPS_MODE, mode, 4)) return false;
+        if (memcmp(mode, targetMode, 4) == 0) return true;
+        delay(5);
+    } while (millis() - start < timeoutMs);
+
+    Serial.print("No encontró el MODE == ");
+    Serial.write((const uint8_t*)targetMode, 4);
+    Serial.print(", actual: ");
+    Serial.write(mode, 4);
+    Serial.println();
+    return false;
+}
+
+bool TPS26750::loadConfig() {
+
+    // Si MODE está en modo "APP" no hace falta parchear. Si esta en modo PTCH se continua
+  if (!waitForMode("APP ", 50)) {   
+        if (!waitForMode("PTCH", 2000)) return false; 
+  } else return true; // ya esta en modo APP termina. 
+
+
+  uint32_t patchSize = PATCH_SIZE;
+  // El TPS debe mandar la señal "Ready for Patch". 
+  if (!waitReadyForPatch(2000)) return false;
+
+  // Se inicia la transacción PBM. P48. Tabla 3-9 "INPUT DATAX".
+  // Los parámetros de PBM se deben enviar como input de un comando 4cc. 
+  // Estos son: tamaño LE (4B) + dirección esclava temporal + timeout.
+  uint8_t pbms_params[6];
+  //Bytes 1-4: Low Region Binary bundle size in bytes (0-3)
+  pbms_params[0] = (patchSize & 0xFF);
+  pbms_params[1] = ((patchSize >> 8) & 0xFF);
+  pbms_params[2] = ((patchSize >> 16) & 0xFF);
+  pbms_params[3] = ((patchSize >> 24) & 0xFF);
+  //Byte 5: i2c adress for downloading patch
+  pbms_params[4] = PATCH_I2C_ADDR; 
+  //Byte 6: Burst mode timeout
+  pbms_params[5] = 0x32;           
+  if (!TPSnBytesWrite(TPSADDR, TPS_DATA1, pbms_params, 6)) return false;
+  if (!sendCommand4CC("PBMs")) return false;
+
+  // Se puede leer el resultado del patch directamente del directorio DATA. Solo tiene 1 byte
+  // Tabla 3-9 "OUTPUT DATAX".
+  uint8_t pbmsStatus;
+  if (!TPSnBytesRead(TPSADDR, TPS_DATA1, &pbmsStatus, 1)) return false;
+  if (pbmsStatus != PBMS_SUCCESS) {
+      sendCommand4CC("PBMe");
       return false;
   }
+
+  // Se transmite el firmware en bloques desde Flash (PROGMEM).
+  uint32_t bytesSent = 0;
+  const uint8_t blockSize = 64;
+  uint8_t chunkBuffer[blockSize];
+
+  while (bytesSent < patchSize) {
+      uint8_t currentChunkSize = min((uint32_t)blockSize, patchSize - bytesSent);
+      memcpy_P(chunkBuffer, &tps_patch_data[bytesSent], currentChunkSize);
+
+      Wire.beginTransmission(PATCH_I2C_ADDR);
+      Wire.write(chunkBuffer, currentChunkSize);
+      if (Wire.endTransmission() != 0) {
+          sendCommand4CC("PBMe");
+          return false;
+      }
+      bytesSent += currentChunkSize;
+      delayMicroseconds(500);
+  }
+
+  // Se indica que se ha terminado de cargar los datos. P49-51. Tabla 3-10.
+  if (!sendCommand4CC("PBMc")) return false;
+
+  // Se comprueba el resultado de PBMc: DevicePatchCompleteStatus (Byte3) y
+  // AppConfigPatchCompleteStatus (Byte4). P50. Tabla 3-10.
+  uint8_t pbmcOut[4];
+  if (TPSnBytesRead(TPSADDR, TPS_DATA1, pbmcOut, 4)) {
+      uint8_t devicePatchStatus = pbmcOut[2]; // 0x00 = éxito
+      uint8_t appConfigStatus   = pbmcOut[3]; // 0x00 = éxito
+      if (devicePatchStatus != 0x00 || appConfigStatus != 0x00) {
+          Serial.print("Error de Patch status: "); Serial.println(devicePatchStatus);
+          Serial.print("Error de Comfig status: "); Serial.println(appConfigStatus);
+          // Diagnóstico: 0x41 mismatch cabecera, 0x42 ROM incompatible,
+          // 0x43 mismatch checksum código, 0x44/0x45 patch nulo/erróneo (Tabla 3-10)
+          return false;
+      }
+  }
+  // El TPS debe cambiar a modo "APP".
+  return waitForMode("APP ", 200);
+}

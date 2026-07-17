@@ -39,8 +39,7 @@ void setup() {
 }
 
 void loop() {
-// Es vital refrescar el Watchdog periódicamente si está activo en el integrado
-// charger.feedWatchdog(); 
+ charger.WD_control(); 
 
 //Estado de la carga
   double vbat = charger.getBatteryVoltage(); // Devuelve el voltaje en mV
@@ -55,7 +54,7 @@ void loop() {
         case 4: Serial.println("Carga de reducción (CV)"); break;
         case 6: Serial.println("Charge temporizada");      break;
         case 7: Serial.println("Carga completa");          break;
-        default: Serial.println("Unknown");                break;
+        default: Serial.println("Descnocido");             break;
     }
 
   Serial.print("Voltaje Batería: ");

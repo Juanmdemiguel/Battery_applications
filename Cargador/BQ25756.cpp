@@ -1,7 +1,5 @@
 #include "BQ25756.h"
 
-
-
 //-----------------------------------limite de corriente de carga----------------------------------//
 uint16_t BQ25756::getChargeCurrentLimit() {
     // Solo contienen información 10:2 -> máscara para quitar 15:11 y desplazamiento

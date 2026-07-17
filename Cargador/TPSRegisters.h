@@ -2,11 +2,15 @@
 
 #define TPSADDR 0x23 //#4. P32 datasheet
 #define PATCH_I2C_ADDR   0x21 // Dirección virtual temporal para el parcheo
+// Códigos de retorno de PBMs (Tabla 3-9, pág. 48)
+#define PBMS_SUCCESS 0x00
 
 //Registros incluidos en el diseño 
 #define TPS_MODE                    0x03  // 4 ASCII chars: 'APP ', 'BOOT', 'PTCH'
 #define TPS_COMMAND_I2C1            0x08  // Comando 4CC (CMD1)
 #define TPS_DATA1                   0x09  // Datos asociados a CMD1 (hasta 64 bytes)
+#define TPS_INT_EVENT1              0x14  // Eventos de interrupción (11 bytes)
+#define TPS_INT_CLEAR1              0x18  // Escribir 1 limpia el evento en INT_EVENT1
 #define TPS_ACTIVE_PDO_CONTRACT     0x34  // PDO del contrato activo
 
 //------------------------Definiciones de registros. Los incluidos en el diseño se encuentran comentados --------------------//
@@ -16,9 +20,9 @@
 #define TPS_CUSTOMER_USE            0x06  // 8 bytes libres para uso propio
 //#define TPS_COMMAND_I2C1            0x08  // Comando 4CC (CMD1)
 //#define TPS_DATA1                   0x09  // Datos asociados a CMD1 (hasta 64 bytes)
-#define TPS_INT_EVENT1              0x14  // Eventos de interrupción (11 bytes)
+//#define TPS_INT_EVENT1              0x14  // Eventos de interrupción (11 bytes)
 #define TPS_INT_MASK1               0x16  // Máscara de eventos
-#define TPS_INT_CLEAR1              0x18  // Escribir 1 limpia el evento en INT_EVENT1
+//#define TPS_INT_CLEAR1              0x18  // Escribir 1 limpia el evento en INT_EVENT1
 #define TPS_STATUS                  0x1A  // Estado no relacionado con interrupciones
 #define TPS_POWER_PATH_STATUS       0x26  // Estado de los switches de potencia
 #define TPS_PORT_CONFIGURATION      0x28  // Config de hardware del puerto (requiere reconexión)
