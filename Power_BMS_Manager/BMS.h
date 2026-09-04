@@ -14,7 +14,7 @@ class BMS {
   float temp[3];
   //System mode
   uint8_t cellSelected=0x83;//3 Cells
-  uint8_t currentGain = 5; //Revisar
+  uint16_t currentGain = 5; //Revisar
   float rSense = 0.005f;       // 5 mOhms
 
   public:
@@ -25,8 +25,12 @@ class BMS {
     bool updateStatus();
     bool updateTemp();
     uint16_t twoByteRead(uint8_t ADDR);
+    bool oneByteWrite(uint8_t reg, uint8_t data);
+    bool oneByteRead(uint8_t ADDR, uint8_t &data);
     void updateGain();  
     bool setCellCount(uint16_t n);      
+    float xtVoltageToTemp(float voltage);
+    bool balanceCells(uint8_t cells, int ms);
   //Get
     float getPackCurrent() const { return packCurrent; }
     float getPackVoltage() const { return packVoltage; }
