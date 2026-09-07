@@ -2,8 +2,9 @@
 #include "Registers.h"
 #include "ISL94202Config.h"
 
-bool check=true; 
+bool check=true; //Flag que indica consecución del código
 
+//Prototipos de las funciones utilizadas
 bool writeReg(uint8_t reg, uint8_t value);
 uint8_t readReg(uint8_t reg);
 bool writeEEPROM(uint8_t reg, uint16_t value);
@@ -74,9 +75,10 @@ void setup() {
 }
 
 void loop() {
-  // There is no need to use loop function for writing, but can be used for error management. 
+  // No es necesario utilizar la función loop() para escribir, pero se puede usar para informar de errores. 
 }
 
+//Declaraciones de las funciones utilizadas
 bool writeReg(uint8_t reg, uint8_t value){
   if (reg > 0xAB) return false;
   Wire.beginTransmission(ISLADDR);
@@ -86,7 +88,7 @@ bool writeReg(uint8_t reg, uint8_t value){
   return true;
 }
 
-uint8_t readReg(uint8_t reg){ //0xFF is used as code error
+uint8_t readReg(uint8_t reg){ //0xFF se usa como código de error
   Wire.beginTransmission(ISLADDR);
   Wire.write(reg);
   if (Wire.endTransmission(false) != 0) return 0xFF;  
@@ -96,28 +98,28 @@ uint8_t readReg(uint8_t reg){ //0xFF is used as code error
   else return 0xFF;
 }
 
-bool writeEEPROM(uint8_t reg, uint16_t value) { //Works for up to two bytes
-    if (reg > 0x4B) // EEPROM
+bool writeEEPROM(uint8_t reg, uint16_t value) { //Funciona hasta dos bytes
+    if (reg > 0x4B) // Comprueba los límites de los registros EEPROM
         return false;
 
-    uint8_t base = reg & 0xFC; //Rounds to the first page byte
+    uint8_t base = reg & 0xFC; //Redonde al byte de la primera página
     uint8_t buffer[4];
 
-    // single-byte reads
-    // First byte shoots page recall (>200µs)
+    // Lecturas de un byte
+    // El primer byte recarga la página (>200µs)
     for (uint8_t i = 0; i < 4; i++) {
         Wire.beginTransmission(ISLADDR);
         Wire.write((uint8_t)(base + i));
         Wire.endTransmission(false);
-        if (i == 0) delay(1); // 1ms page recall 
+        if (i == 0) delay(1); // 1ms de recargar la página
         Wire.requestFrom(ISLADDR, 1);
-        if (Wire.available()) buffer[i] = Wire.read(); //Fills buffer with previous EEPROM reads
+        if (Wire.available()) buffer[i] = Wire.read(); //Llena el buffer con las lecturas pervias de la EEPROM
     }
-    buffer[reg & 0x03] = value & 0x00FF; //Changes desired bit position, using only the latter byte
-    // 0x03=00000011 -> reg & 0xFC selects page -> 0x03 selects position
+    buffer[reg & 0x03] = value & 0x00FF; //Cambia la posición del bit deseado, usando solo el último byte
+    // 0x03=00000011 -> reg & 0xFC selecciona la página -> 0x03 selecciona la posición
     if((value & 0xFF00) > 0) buffer[(reg & 0x03) + 1] = value >> 8 ;
 
-    // Write first byte twice
+    // Escribe el primer byte dos veces
     for(uint8_t i = 0; i<2; i++){
       Wire.beginTransmission(ISLADDR);
       Wire.write(base);
@@ -126,7 +128,7 @@ bool writeEEPROM(uint8_t reg, uint16_t value) { //Works for up to two bytes
       delay(30);
     }
 
-    // Write remaining bytes
+    // Escribe los bytes restantes
     for (uint8_t i = 1; i < 4; i++) {
         Wire.beginTransmission(ISLADDR);
         Wire.write((uint8_t)(base + i));
@@ -136,13 +138,15 @@ bool writeEEPROM(uint8_t reg, uint16_t value) { //Works for up to two bytes
     }
     return value == readReg(reg);
 }
-//Forces IDLE Mode, disables thresholds and readings and enables EEPROM register. Refer to Renesas page 148
+
+//P148 DATASHEET ISL94202
+//Fuerza el modo IDLE, deshabilita los umbrales y las lecturas y habilita los registros EEPROM
 bool enableEEPROMAccess(){return writeReg(0x88, 0x01) && writeReg(0x87, 0x04) && 
   writeReg(0x44, 0x00) && writeReg(0x45, 0x00) && writeReg(0x89, 0x01);
 }
 
 bool disableEEPROMAccess(){return writeReg(0x89, 0x00) && writeReg(0x87, 0x00) &&  
-  writeReg(0x44, 0x00) && writeReg(0x45, 0x00); //0x44-45 need to be changed to desired value.
+  writeReg(0x44, 0x00) && writeReg(0x45, 0x00); //0x44-45 se necesitan cambiar al valor deseado
 } 
 
 uint16_t CELLmVtoHEX(uint16_t mV){return (mV*1000*3*4095)/(1.8*8);}
@@ -245,13 +249,15 @@ bool setCBMaxErr(uint16_t mV){
   return writeEEPROM(CBMaxDifADDR, code);
 }
 
-bool setCBOnTime(uint16_t ms, uint8_t TU){ //Renesas Page 53
+//P53 DATSHEET ISL94202
+bool setCBOnTime(uint16_t ms, uint8_t TU){ 
   if (ms>1023 || TU > 0b11) return false;
   uint16_t code = TU<<10 | ms;
   return writeEEPROM(CBOnTimADDR, code);
 }
 
-bool setCBOffTime(uint16_t ms, uint8_t TU){ //Renesas Page 53
+//P53 DATSHEET ISL94202
+bool setCBOffTime(uint16_t ms, uint8_t TU){ 
   if (ms>1023 || TU > 0b11) return false;
   uint16_t code = TU<<10 | ms;
   return writeEEPROM(CBOnTimADDR, code);

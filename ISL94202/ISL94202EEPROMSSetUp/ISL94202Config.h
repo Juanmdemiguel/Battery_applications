@@ -1,12 +1,21 @@
 #pragma once 
 
-//Time parameters
+/* -----------CONFIGURACIÓN DEL ISL94202------------
+En este archivo se dan valor a los parámetros que se
+deben configurar dentro del ISL94202. Estos valores
+se utilizan más tarde para la carga de configuración
+de la EEPROM, en ejecución del programa. 
+Los valores actuales corresponden a:
+  -V alores por defecto incluidos en la EEPROM, 
+  válidos para baterías: LiPo.
+--------------------------------------------------*/
+//Parámetros de tiempo
 #define microseconds 0b00
 #define miliseconds 0b01
 #define seconds 0b10
 #define minutes 0b11
 
-//Number of Cells
+//Número de celdas
 #define CELLCOUNT 3
 
 //OV = Over Voltage, UV = Under Volatage
@@ -67,7 +76,7 @@
 #define DisChargeUTThreshold 1344
 #define DisChargeUTRecovery 1190
 
-//SetUp0 parameters
+//Parámetros SetUp0
 #define FailShutdown 0
 #define TH2Mode 1
 #define TempGain 0
@@ -75,7 +84,7 @@
 #define OpenWireDisable 0
 #define OpenWireShutdown 0
 
-//SetUp1 parameters
+//Parámetros SetUp1 
 #define DischargeCB 0
 #define ChargeCB 1
 #define DischargeUV 0

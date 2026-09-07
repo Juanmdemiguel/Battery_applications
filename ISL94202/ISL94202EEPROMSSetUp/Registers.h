@@ -1,14 +1,14 @@
 #pragma once 
 
-//I2C adressed from datasheet
-#define ISLADDR 0x28 //Internally wire.h does 0x28<<0 || 0x28<<1
+//Dirección I2C. P141 DATASHEET ISL94202
+#define ISLADDR 0x28 //Internamente, wire.h hace 0x28<<0 || 0x28<<1
 //0x28 == 00101000. <<1 == 01010001 == 0x51. <<0 == 01010000 == 0x50 -> Only use if ADDR Pin is tied to Vss.
 
 //OV = Over Voltage, UV = Under Voltage, EOC = End of Charge, DC = Discharge, C = Charge, OC = OverCurrent, 
 //SC = ShorCircuit, CB = Cell Balance, LP = Low Power, DS = Deep Sleep, OW = Open Wire.
 
-//Every one of these adressed contains 12bits, thus it needs two bytes to be written. The top 4 bits of each
-//second byte are always 0. Registers that fall far from this category are explained separately.  
+//Todos estos registros contienen 12bits, por lo que se deben escribir dos bytes. Los últimos 4 bits
+//están reservados. Los registros que no entran en esta categoría se explican por separado.  
 #define OVThresADDR         0x00 //Define el sobrevoltaje por celda [V]
 #define OVRecovADDR         0x02 //Añade histéresis por celda. Define la recuperación de sobrevoltaje y debe ser menor que OV [V]
 #define UVThresADDR         0x04 //Eq
@@ -38,13 +38,16 @@
 #define DCOTRecovADDR       0x3A
 #define DCUTThresADDR       0x3C
 #define DCUTRecovADDR       0x3E
-//Internal Over and Under Temperature are considered standard and constante for security
-//Same can be said about Sleep Level Voltage Threshold, Watchdog and delay timer and Mode timers
+
+//Internal Over and Under Temperature se consideran estándar y constantes por seguridad
+//Lo mismo se puede decir sobre el nivel de tensión de suspensión, el Watchdog, el temporizador de retardo y los temporizadores 
+//de los modos.
 #define CellCountADDR       0x49
 #define SetUp0              0x4A
 #define SetUp1              0x4B
 
-//Every one of these adressed contains 15bits, thus it needs two bytes to be written. Registers contain both 3 bit set up and timer config
+//Registros que contienen 15bits. Necesitan escribirse con dos bytes. Estos registros contienen tanto configuración de 3 bits 
+//como configuración del temporizador.
 #define DCOCTIMADDR         0x16 // Corriente de descarga
 #define COCTIMADDR          0x18 // Corriente de carga
 #define DCSCTIMADDR         0x1A // Cortocircuito en la descarga
