@@ -1,6 +1,8 @@
 #include "BMS.h"
 #include <Wire.h>
 
+//Realiza una lectura de dos bytes, adaptándose a las estructura del ISL94202
+//La mayoría de registros se almacenan en 12bits, con dos bytes y 4 bits reservados.
 uint16_t BMS::twoByteRead(uint8_t ADDR){
   Wire.beginTransmission(ISLADDR);
   Wire.write(ADDR);
@@ -8,10 +10,11 @@ uint16_t BMS::twoByteRead(uint8_t ADDR){
   Wire.requestFrom((uint8_t)ISLADDR, (uint8_t)2);
   if (Wire.available()>=2){
     uint8_t low = Wire.read();
-    return (uint16_t)(Wire.read() & (uint8_t)0x0F) << 8 | low; //Last four need to be reserved
+    return (uint16_t)(Wire.read() & (uint8_t)0x0F) << 8 | low; //Los últimos cuatro son reservados
   } else return 0;
 }
 
+//Escritura genérica de un byte
 bool BMS::oneByteWrite(uint8_t reg, uint8_t data){
   Wire.beginTransmission(ISLADDR);
   Wire.write(reg);
@@ -19,6 +22,7 @@ bool BMS::oneByteWrite(uint8_t reg, uint8_t data){
   return Wire.endTransmission() == 0;
 }
 
+//Lectura genérica de un byte
 bool BMS::oneByteRead(uint8_t ADDR, uint8_t &data) {
   Wire.beginTransmission(ISLADDR);
   Wire.write(ADDR);
@@ -29,10 +33,11 @@ bool BMS::oneByteRead(uint8_t ADDR, uint8_t &data) {
   return true;
 }
 
-
+//P90 DATASHEET ISL94202
+//Registros 0x90-0x9F: Almacenan las lecturas de voltaje de las celdas
 bool BMS::updateCellsVoltages(){
  for (uint8_t i = 0; i < 8; i++) {
-   if ((cellSelected >> i) & 0x01) {
+   if ((cellSelected >> i) & 0x01) { //Solo lee las que están conectadas. (codificadas según P67)
       uint16_t raw=twoByteRead(0x90+2*i);
       if (raw==0) return false;
       cellVoltage[i]=(raw*1.8f*8.0f)/(4095.0f*3.0f);
@@ -41,11 +46,15 @@ bool BMS::updateCellsVoltages(){
   return true;
 }
 
+//P90 DATASHEET ISL94202
+//Registros 0x8E-0x8F: Almacenan las lecturas de intensidad medido por la resistencia shunt
 void BMS::updatePackCurrent(){
   uint16_t raw=twoByteRead(0x8E);
   packCurrent=(raw*1.8f)/(4095.0f*currentGain*rSense);
 }
 
+//P92 DATASHEET ISL94202
+//Registros 0xA6-0xA7: Almacenan las lecturas de tensión de la batería
 bool BMS::updatePackVoltage(){
   uint16_t raw=twoByteRead(0xA6);
   if (raw==0) return false;
@@ -53,6 +62,8 @@ bool BMS::updatePackVoltage(){
   return true;
 }
 
+//P71 DATASHEET ISL94202
+//Registros 0x8E-0x8F: Almacenan las el valor de los registros de estado
 bool BMS::updateStatus(){
   uint16_t raw=twoByteRead(0x80);
     status[0]= (uint8_t)(raw & 0x00FF);
@@ -63,6 +74,9 @@ bool BMS::updateStatus(){
   return true;
 }
 
+//P91 DATASHEET ISL94202
+//Registros 0xA0-0xA1: Almacenan las lecturas de temperatura medido por el sensor interno
+//Registros 0xA2-0xA5: Almacenan las lecturas de temperatura medido por los termistores
 bool BMS::updateTemp(){
   uint16_t raw;
   float tempV;
@@ -77,12 +91,13 @@ bool BMS::updateTemp(){
   return true;
 }
 
-//Interpolación desde la Tabla 70. P96 RENESAS ISL94202 DATASHEET.
+// P96 DATASHEET ISL94202.
+// Interpolación desde la Tabla 70. 
 float BMS::xtVoltageToTemp(float voltage){
     const float V[] = {0.7396f, 0.6112f, 0.4537f, 0.2887f, 0.1495f};
     const float T[] = {-40.0f, 0.0f, 25.0f, 50.0f, 80.0f};
 
-    voltage /= 2.0f; //Gain=2. P96 ENESAS ISL94202 DATASHEET. Figure 39.
+    voltage /= 2.0f; //Gain=2. P96 RENESAS ISL94202 DATASHEET. Figure 39.
     if (voltage > V[0] || voltage < V[4]) return 0; //Comprueba la ventana posible
     for (uint8_t i = 0; i < 4; i++) {
         if (voltage <= V[i] && voltage >= V[i + 1]) {
@@ -92,6 +107,7 @@ float BMS::xtVoltageToTemp(float voltage){
     return 0;
 }
 
+// P79-80 DATASHEET ISL94202.
 void BMS::updateGain() {
     Wire.beginTransmission(ISLADDR);
     Wire.write(0x85); 
@@ -112,12 +128,15 @@ void BMS::updateGain() {
     }
 }
 
+// P67 DATASHEET ISL94202.
+// Establece el número de celdas a medir
 bool BMS::setCellCount(uint16_t n){
 if (!(n == 3 || n == 4 || n == 6 || n == 7 || n == 8)) return false;
   uint8_t code;
   switch(n){
     case 3: default: code = 0x83; break;  
     case 4: code = 0xC3; break;
+    case 6: code = 0xDF; break; 
     case 7: code = 0xEF; break;
     case 8: code = 0xFF; break;
   }
@@ -125,12 +144,17 @@ if (!(n == 3 || n == 4 || n == 6 || n == 7 || n == 8)) return false;
     Wire.write(0x49); // Registro de Cell Select
     Wire.write(code);
     if (Wire.endTransmission() == 0){
-      cellSelected=code;
+      cellSelected=code; //Actualiza el atributo de la clase
       return true;
     }
     return false;
 }
 
+// P78, P82 DATASHEET ISL94202.
+// Permite el equilibrio forzado por MCU. Utiliza un proceso de varios registros
+// 1. Se activa el equilibrio por MCU. Registro 0x87-D[5]
+// 2. Se seleccionan las celdas a balancear. Registro 0x84
+// 3. Se balancean las celdas seleccionadas. Registro 0x87-D[0]. (Solo si se ha realizado el paso 1)
 bool BMS::balanceCells(uint8_t cells, int ms){
   uint8_t cb = 1 << (cells - 1);
 

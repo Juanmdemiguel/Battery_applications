@@ -10,14 +10,18 @@ void setup() {
   delay(1000);
   Serial.println("Iniciando sistema BMS...");
   Wire.begin(); //Init as master -> teensy: 18 SDA0, 19 SCL0
- // Wire.setWireTimeout(1000, true);
   Wire.setClock(100000);
- // bool i2c_ok = false;
   Wire.beginTransmission(ISLADDR);
 
-   uint8_t err=Wire.endTransmission();
+  uint8_t err=Wire.endTransmission();
+  /* Códigos de error:
+      0-> Éxito, el dispositivo esclavo ha contestado ACK (acknowledge)
+      1-> Buffer de datos demasiado largo
+      2-> Se envió un mensaje al esclavo, pero no contestó con ACK
+      3-> El dispositivo esclavo respondió a su dirección, pero rechazó uno de los bytes de datos transmitidos posteriormente
+      4-> Error genérico, probablemente no detectado
+      5-> Tiempo de espera agotado */
   if (err==0) {
-     // i2c_ok = true;
       Serial.println("BMS detectado correctamente.");
     } else {
       Serial.print("Código de error: "); Serial.println(err);
@@ -29,10 +33,12 @@ void setup() {
         delay(500);
       } 
   }
+  //Adapta el número de celdas. Se debe cambiar en función del uso.
   manager.setCellCount(4) ? Serial.println("Número de celdas establecido en 4.") : Serial.println("Error I2C: Fallo en el cambio del número de celdas.") ;
 }
 
 void loop() {
+  //Actualiza los atributos con las lecturas del BMS
   if (!manager.updatePackVoltage()) Serial.println("Error I2C: Fallo en lectura de voltaje del pack.");
   if (!manager.updateCellsVoltages()) Serial.println("Error I2C: Fallo en lectura de voltaje de las celdas.");
   if (!manager.updateTemp()) Serial.println("Error I2C: Fallo en lectura de temperatura.");
@@ -67,15 +73,15 @@ void loop() {
     Serial.println(" V");
   }
 
+/*Equilibrado forzado por MCU
 if (!(manager.balanceCells(1, 1000) & 
       manager.balanceCells(2, 1000) & 
       manager.balanceCells(7, 1000) & 
       manager.balanceCells(8, 1000))) {
     Serial.println(" Error de equilibrado");
-}
+}*/
 
   Serial.println("-----------------");
-  
   delay(5000); 
 }
 
