@@ -5,7 +5,7 @@
 // MSB: Most Significant Bit
 // LSB: Least Significant Bit
 //------------------------------------ PDO: Power Data Object----------------------------------------//
-/* Información sobre el contrato de energía que realiza el USB power delivery
+/* Información sobre el contrato de energía que realiza el USB power delivery: 
    En el tps se organizan en: 
        - 41-32: bits 29-20 del primero contrato PDO.
        - 31-0 : contrato PDO actual.
@@ -82,8 +82,7 @@
 /* TPS25750 Host Interface Technical Reference Manual P11
 Se observa en la figura 1-3 que el primer byte leido es (byte count), por lo que la lectura del TPS 
 se diferencia de la lectura general por I2C y permite lectura de nbytes. 
-Siglas de la figura == S: Start, Sr: Repeated Start, Wr: Write, Rd: Read, A: Acknowledge, P: Stop
-*/
+Siglas de la figura == S: Start, Sr: Repeated Start, Wr: Write, Rd: Read, A: Acknowledge, P: Stop*/
   bool TPSnBytesRead(uint8_t DEVADDR, uint8_t REGADDR, uint8_t* data, uint8_t n) {
       Wire.beginTransmission(DEVADDR);
       Wire.write(REGADDR);

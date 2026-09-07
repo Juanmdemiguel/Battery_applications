@@ -12,7 +12,7 @@ class TPS26750 {
     bool success;   
   public:
     TPS26750(){voltage = 0; maxvoltage = 0; minvoltage = 0; maxpower = 0; current = 0; success=false;}
-
+  //Get
     float getmaxvoltage(){return maxvoltage;}
     float getminvoltage(){return minvoltage;}
     float getvoltage(){return voltage;}
@@ -20,6 +20,7 @@ class TPS26750 {
     float getmaxpower(){return maxpower;}
     bool getsuccess(){return success;}
 
+  //Acciones
     bool TPSnBytesRead(uint8_t DEVADDR, uint8_t REGADDR, uint8_t* data, uint8_t n);
     bool TPSnBytesWrite(uint8_t DEVADDR, uint8_t REGADDR, const uint8_t* data, uint8_t n);
     bool sendCommand4CC(const char* command);

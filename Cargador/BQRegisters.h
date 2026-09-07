@@ -1,9 +1,11 @@
 #pragma once 
 #include <Arduino.h>
+//P39 DATASHEET BQ25756
+
 // Dirección I2C del BQ25756
 #define BQADDR 0x6B
 
-//Parámetros definidos por hardware
+//Parámetros definidos por hardware. Ver diseño electrónico en el TFG
 #define SWITCHING_FREQUENCY_KHZ 300   // Frecuencia de conmutación del convertidor (300kHz)
 #define NOMINAL_MAX_CHARGE_MA   15000  // Corriente de carga máxima deseada (15A)
 #define NOMINAL_MAX_INPUT_MA    10500  // Corriente de entrada máxima desde la fuente (10.5A)

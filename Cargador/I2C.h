@@ -7,6 +7,7 @@ class I2C {
       //La clase solo debe contener funciones estáticas, no debe ser capaz de instanciarse
       I2C() = delete; 
 
+ //Lectura de un byte
   static uint8_t byteRead(uint8_t DEVADDR, uint8_t REGADDR) {
       Wire.beginTransmission(DEVADDR);
       Wire.write(REGADDR);
@@ -17,6 +18,7 @@ class I2C {
       } else return 0;
   }
 
+//Lectura de dos bytes
   static uint16_t twoByteRead(uint8_t DEVADDR, uint8_t REGADDR) { //Lectura de bits en formato little endian
       Wire.beginTransmission(DEVADDR);
       Wire.write(REGADDR);
@@ -28,13 +30,14 @@ class I2C {
       } else return 0;
   }
 
+//Escritura de un byte
   static bool byteWrite(uint8_t DEVADDR, uint8_t REGADDR, uint8_t value) {
       Wire.beginTransmission(DEVADDR);
       Wire.write(REGADDR);                          
       Wire.write(value);     
       return Wire.endTransmission() == 0;
   }
-
+//Escritura de dos bytes
   static bool twoByteWrite(uint8_t DEVADDR, uint8_t REGADDR, uint16_t value) {
       Wire.beginTransmission(DEVADDR);
       Wire.write(REGADDR);                          
