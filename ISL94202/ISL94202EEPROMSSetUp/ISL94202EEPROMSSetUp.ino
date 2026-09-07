@@ -98,6 +98,7 @@ uint8_t readReg(uint8_t reg){ //0xFF se usa como código de error
   else return 0xFF;
 }
 
+//P148 DATASHEET ISL94202
 bool writeEEPROM(uint8_t reg, uint16_t value) { //Funciona hasta dos bytes
     if (reg > 0x4B) // Comprueba los límites de los registros EEPROM
         return false;
@@ -144,17 +145,20 @@ bool writeEEPROM(uint8_t reg, uint16_t value) { //Funciona hasta dos bytes
 bool enableEEPROMAccess(){return writeReg(0x88, 0x01) && writeReg(0x87, 0x04) && 
   writeReg(0x44, 0x00) && writeReg(0x45, 0x00) && writeReg(0x89, 0x01);
 }
-
 bool disableEEPROMAccess(){return writeReg(0x89, 0x00) && writeReg(0x87, 0x00) &&  
   writeReg(0x44, 0x00) && writeReg(0x45, 0x00); //0x44-45 se necesitan cambiar al valor deseado
 } 
 
+//Para escribir en los registros es necesario convertir su contenido a binario
 uint16_t CELLmVtoHEX(uint16_t mV){return (mV*1000*3*4095)/(1.8*8);}
 uint16_t CELLHEXtomV(uint16_t code){return (code*1.8*8*1000)/(4095*3);}
 
 uint16_t THmVtoHEX(uint16_t mV){return (mV*1000*4095)/(1.8);}
 uint16_t THHEXtomV(uint16_t code){return (code*1.8*1000)/(4095);}
 
+//P35-36, P38 DATASHEET ISL94202
+//Contiene el umbral, la recuperación, el bloqueo de sobretensión
+//Contiene además el pulso de detección de carga (charge) (CPWD)
 bool setOV(uint16_t thres, uint16_t recov, uint16_t lock, uint8_t CPWD){ 
   if (recov>thres || thres>lock || CPWD>15) return false;
   uint16_t code[3];
@@ -164,26 +168,36 @@ bool setOV(uint16_t thres, uint16_t recov, uint16_t lock, uint8_t CPWD){
   return writeEEPROM(OVThresADDR, code[0]) && writeEEPROM(OVRecovADDR, code[1]) && writeEEPROM(OVLockADDR, code[2]);
 }
 
-bool setUV(uint16_t thres, uint16_t recov, uint16_t lock, uint8_t CPWD){ 
-  if (recov<thres || thres<lock || CPWD>15) return false;
+//P37-39 DATASHEET ISL94202
+//Contiene el umbral, la recuperación, el bloqueo de subtensión
+//Contiene además el pulso de detección de carga (load) (LDPW)
+bool setUV(uint16_t thres, uint16_t recov, uint16_t lock, uint8_t LDPW){ 
+  if (recov<thres || thres<lock || LDPW>15) return false;
   uint16_t code[3];
-  code[0]=CPWD<<12 | CELLmVtoHEX(thres);
+  code[0]=LDPW<<12 | CELLmVtoHEX(thres);
   code[1]=CELLmVtoHEX(recov);
   code[2]=CELLmVtoHEX(lock);
   return writeEEPROM(UVThresADDR, code[0]) && writeEEPROM(UVRecovADDR, code[1]) && writeEEPROM(UVLockADDR, code[2]);
 }
 
+//P40 DATASHEET ISL94202
+//Define final de la carga
 bool setEOCThres(uint16_t mV){
   if (mV>CELLHEXtomV(4095)) return false;
   uint16_t code = CELLmVtoHEX(mV);
   return writeEEPROM(EOCThresADDR, code);
 }
 
+//P41-42 DATASHEET ISL94202
+//Define el tiempo en el que debe presentar OV o UV para saltar la protección
+//Se programa con las unidades (Definidas en ISL94202Config.h) y el valor
 bool setOVUVTimer(uint8_t TU, uint8_t Timing){
   uint16_t code = TU << 10 | Timing ;
   return writeEEPROM(OVTimADDR, code) && writeEEPROM(UVTimADDR, code);
 }
 
+//P40 DATASHEET ISL94202
+//Define el voltaje bajo de la celda
 bool setLCVL(uint16_t mV){
   if (mV>CELLHEXtomV(4095)) return false;
   uint16_t code = CELLmVtoHEX(mV);
@@ -192,6 +206,9 @@ bool setLCVL(uint16_t mV){
 
 //OWTimer
 
+//P43 DATASHEET ISL94202
+//Define cuanta sobrecorriente en descarga dispara la protección y cuanto tiempo debe estar
+//Se programa con las unidades (Definidas en ISL94202Config.h) y el valor (tiempo y corriente)
 bool setDCOC(uint16_t A, uint8_t TU, uint8_t Timing){
   const uint16_t A_values[]  = {4, 8, 16, 24, 32, 48, 64};
   uint8_t dcoc = 0xFF;
@@ -203,6 +220,9 @@ bool setDCOC(uint16_t A, uint8_t TU, uint8_t Timing){
   return writeEEPROM(DCOCTIMADDR, code);
 }
 
+//P46 DATASHEET ISL94202
+//Define cuanta sobrecorriente en carga dispara la protección y cuanto tiempo debe estar
+//Se programa con las unidades (Definidas en ISL94202Config.h) y el valor (tiempo y corriente)
 bool setCOC(uint16_t A, uint8_t TU, uint8_t Timing){
   const uint16_t A_values[] = {1, 2, 4, 6, 8, 12, 16, 24};
   uint8_t dcoc = 0xFF;
@@ -214,6 +234,9 @@ bool setCOC(uint16_t A, uint8_t TU, uint8_t Timing){
   return writeEEPROM(COCTIMADDR, code);
 }
 
+//P48 DATASHEET ISL94202
+//Define cuanta sobrecorriente en carga dispara la protección y cuanto tiempo debe estar
+//Se programa con las unidades (Definidas en ISL94202Config.h) y el valor (tiempo y corriente)
 bool setDCSC(uint16_t A, uint8_t TU, uint8_t Timing){
   const uint16_t A_values[] = {16, 24, 32, 48, 64, 96, 128};
   uint8_t dcoc = 0xFF;
@@ -225,44 +248,58 @@ bool setDCSC(uint16_t A, uint8_t TU, uint8_t Timing){
   return writeEEPROM(DCSCTIMADDR, code);
 }
 
+//P49 DATASHEET ISL94202
+//Deshabilita el equilibrio de las celdas si están por debajo de este umbral
 bool setCBMin(uint16_t mV){
   if (mV>CELLHEXtomV(4095)) return false;
   uint16_t code = CELLmVtoHEX(mV);
   return writeEEPROM(CBMinADDR, code);
 }
 
+//P50 DATASHEET ISL94202
+//Deshabilita el equilibrio de las celdas si están por encima de este umbral
 bool setCBMax(uint16_t mV){
   if (mV>CELLHEXtomV(4095)) return false;
   uint16_t code = CELLmVtoHEX(mV);
   return writeEEPROM(CBMaxADDR, code);
 }
 
+//P50 DATASHEET ISL94202
+//Mínima diferencia entre celdas para equilibrarlas
 bool setCBMinErr(uint16_t mV){
   if (mV<10 ||mV>CELLHEXtomV(4095)) return false;
   uint16_t code = CELLmVtoHEX(mV);
   return writeEEPROM(CBMinDifADDR, code);
 }
 
+//P51 DATASHEET ISL94202
+//Máxima diferencia entre celdas para equilibrarlas
 bool setCBMaxErr(uint16_t mV){
   if (mV>CELLHEXtomV(4095)) return false;
   uint16_t code = CELLmVtoHEX(mV);
   return writeEEPROM(CBMaxDifADDR, code);
 }
 
-//P53 DATSHEET ISL94202
+//P53 DATASHEET ISL94202
+//Tiempo que permanece apagado el equilibrado en cada ciclo
+//Se programa con las unidades (Definidas en ISL94202Config.h) y el valor
 bool setCBOnTime(uint16_t ms, uint8_t TU){ 
   if (ms>1023 || TU > 0b11) return false;
   uint16_t code = TU<<10 | ms;
   return writeEEPROM(CBOnTimADDR, code);
 }
 
-//P53 DATSHEET ISL94202
+//P53 DATASHEET ISL94202
+//Tiempo que permanece encendido el equilibrado en cada ciclo
+//Se programa con las unidades (Definidas en ISL94202Config.h) y el valor
 bool setCBOffTime(uint16_t ms, uint8_t TU){ 
   if (ms>1023 || TU > 0b11) return false;
   uint16_t code = TU<<10 | ms;
   return writeEEPROM(CBOnTimADDR, code);
 }
 
+//P53 DATASHEET ISL94202
+//Deshabilita el equilibrado en temperaturas bajas. Presenta umbral y recuperación
 bool setCBUT(uint16_t thres, uint16_t recov){ 
   if (recov<thres) return false;
   uint16_t code[2];
@@ -271,6 +308,8 @@ bool setCBUT(uint16_t thres, uint16_t recov){
   return writeEEPROM(CBUTThresADDR, code[0]) && writeEEPROM(CBUTRecovADDR, code[1]);
 }
 
+//P55 DATASHEET ISL94202
+//Deshabilita el equilibrado en temperaturas altas. Presenta umbral y recuperación
 bool setCBOT(uint16_t thres, uint16_t recov){ 
   if (recov>thres) return false;
   uint16_t code[2];
@@ -279,6 +318,8 @@ bool setCBOT(uint16_t thres, uint16_t recov){
   return writeEEPROM(CBOTThresADDR, code[0]) && writeEEPROM(CBOTRecovADDR, code[1]);
 }
 
+//P57 DATASHEET ISL94202
+//Define la sobretemperatura en la carga con su umbral y su recuperación
 bool setCOT(uint16_t thres, uint16_t recov){ 
   if (recov>thres) return false;
   uint16_t code[2];
@@ -287,6 +328,8 @@ bool setCOT(uint16_t thres, uint16_t recov){
   return writeEEPROM(COTThresADDR, code[0]) && writeEEPROM(COTRecovADDR, code[1]);
 }
 
+//P58 DATASHEET ISL94202
+//Define la subtemperatura en la carga con su umbral y su recuperación
 bool setCUT(uint16_t thres, uint16_t recov){ 
   if (recov<thres) return false;
   uint16_t code[2];
@@ -295,6 +338,8 @@ bool setCUT(uint16_t thres, uint16_t recov){
   return writeEEPROM(CUTThresADDR, code[0]) && writeEEPROM(CUTRecovADDR, code[1]);
 }
 
+//P59 DATASHEET ISL94202
+//Define la subtemperatura en la descarga con su umbral y su recuperación
 bool setDCOT(uint16_t thres, uint16_t recov){ 
   if (recov>thres) return false;
   uint16_t code[2];
@@ -303,6 +348,8 @@ bool setDCOT(uint16_t thres, uint16_t recov){
   return writeEEPROM(DCOTThresADDR, code[0]) && writeEEPROM(DCOTRecovADDR, code[1]);
 }
 
+//P61 DATASHEET ISL94202
+//Define la subtemperatura en la descarga con su umbral y su recuperación
 bool setDCUT(uint16_t thres, uint16_t recov){ 
   if (recov<thres) return false;
   uint16_t code[2];
@@ -311,6 +358,9 @@ bool setDCUT(uint16_t thres, uint16_t recov){
   return writeEEPROM(DCUTThresADDR, code[0]) && writeEEPROM(DCUTRecovADDR, code[1]);
 }
 
+//P67 DATASHEET ISL94202
+//Define el número de celdas a leer
+//Se codifican igual a las entradas que leen su tensión (ver P150 DATASHEET ISL94202)
 bool setCellCount(uint16_t n){
 if (!(n == 3 || n == 4 || n == 7 || n == 8)) return false;
   uint8_t code;
@@ -323,11 +373,15 @@ if (!(n == 3 || n == 4 || n == 7 || n == 8)) return false;
   return writeEEPROM(CellCountADDR, code);
 }
 
+//P67 DATASHEET ISL94202
+//Contiene configuraciones en bits que habilitan/deshabilitan operaciones o controles.
 bool setUp0Reg(bool PSD, bool XT2M, bool TGAIN, bool PCFETE, bool DOWD, bool OWPSD){
   uint8_t code = PSD << 7 | XT2M << 5| TGAIN << 4 | PCFETE << 2 | DOWD << 1 | OWPSD;
 return writeEEPROM(SetUp0, code);
 }
 
+//68 DATASHEET ISL94202
+//Contiene configuraciones en bits que habilitan/deshabilitan operaciones o controles.
 bool setUp1Reg(bool CBDD, bool CBDC, bool DFODUV, bool CFODOV, bool UVLOPD, bool CB_EOC){
   uint8_t code = CBDD << 7 | CBDC << 6| DFODUV << 5 | CFODOV << 4 | UVLOPD << 3 | CB_EOC;
 return writeEEPROM(SetUp1, code);

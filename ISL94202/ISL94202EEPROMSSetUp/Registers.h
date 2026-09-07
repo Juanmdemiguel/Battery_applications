@@ -1,4 +1,5 @@
 #pragma once 
+//P32  DATASHEET ISL94202
 
 //Dirección I2C. P141 DATASHEET ISL94202
 #define ISLADDR 0x28 //Internamente, wire.h hace 0x28<<0 || 0x28<<1
