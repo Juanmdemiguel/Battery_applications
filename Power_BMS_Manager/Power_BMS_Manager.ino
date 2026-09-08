@@ -35,6 +35,7 @@ void setup() {
   }
   //Adapta el número de celdas. Se debe cambiar en función del uso.
   manager.setCellCount(4) ? Serial.println("Número de celdas establecido en 4.") : Serial.println("Error I2C: Fallo en el cambio del número de celdas.") ;
+  delay(1000);
 }
 
 void loop() {

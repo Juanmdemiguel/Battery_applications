@@ -5,9 +5,10 @@
 bool check=true; //Flag que indica consecución del código
 
 //Prototipos de las funciones utilizadas
+bool checkStep(bool result, const char* stepName);
 bool writeReg(uint8_t reg, uint8_t value);
-uint8_t readReg(uint8_t reg);
-bool writeEEPROM(uint8_t reg, uint16_t value);
+bool readReg(uint8_t reg, uint8_t &val);
+bool writeEEPROM(uint8_t reg, uint16_t value,bool is16Bit=true);
 bool enableEEPROMAccess();
 bool disableEEPROMAccess();
 uint16_t CELLmVtoHEX(uint16_t mV);
@@ -39,39 +40,64 @@ bool setUp0Reg(bool PSD = 0, bool XT2M = 0, bool TGAIN = 0, bool PCFETE = 0, boo
 bool setUp1Reg(bool CBDD = 0, bool CBDC = 1, bool DFODUV = 0, bool CFODOV = 0, bool UVLOPD = 0, bool CB_EOC = 0);
 
 void setup() {
- Wire.begin(); 
- Wire.setClock(400000);
+ Serial.begin(115200); 
+  pinMode(LED_BUILTIN, OUTPUT);
+  delay(1000);
+  Serial.println("Iniciando sistema BMS...");
+  Wire.begin(); //Init as master -> teensy: 18 SDA0, 19 SCL0
+  Wire.setClock(100000);
+  Wire.beginTransmission(ISLADDR);
 
- Wire.beginTransmission(0x01);
- Wire.write(00);
- Wire.endTransmission(true);
+  uint8_t err=Wire.endTransmission();
+  /* Códigos de error:
+      0-> Éxito, el dispositivo esclavo ha contestado ACK (acknowledge)
+      1-> Buffer de datos demasiado largo
+      2-> Se envió un mensaje al esclavo, pero no contestó con ACK
+      3-> El dispositivo esclavo respondió a su dirección, pero rechazó uno de los bytes de datos transmitidos posteriormente
+      4-> Error genérico, probablemente no detectado
+      5-> Tiempo de espera agotado */
+  if (err==0) {
+      Serial.println("BMS detectado correctamente.");
+    } else {
+      Serial.print("Código de error: "); Serial.println(err);
+      Serial.println("Error I2C: BMS no encontrado.");
+      while (1){ // Bloquea el programa si no hay BMS con led de error
+        digitalWrite(LED_BUILTIN, HIGH);
+        delay(500);
+        digitalWrite(LED_BUILTIN, LOW);
+        delay(500);
+      } 
+  }
+if (checkStep(enableEEPROMAccess(),"enableEEPROMAccess")) {
+  check = true;
+  check &= checkStep(setOV(OVThreshold, OVRecovery, OVLock, OVChargeDetectPulseWidth), "setOV");
+  check &= checkStep(setUV(UVThreshold, UVRecovery, UVLock, UVChargeDetectPulseWidth), "setUV");
+  check &= checkStep(setEOCThres(EndOfChargeThreshold), "setEOCThres");
+  check &= checkStep(setLCVL(LowVoltageCharge), "setLCVL");
+  check &= checkStep(setOVUVTimer(OVUVTimeUnits, OVUVTimer), "setOVUVTimer");
+  check &= checkStep(setDCOC(DischargeOCAmps, DisChargeOCUnits, DisChargeOCTime), "setDCOC");
+  check &= checkStep(setCOC(ChargeOCAmps, ChargeOCUnits, ChargeOCTime), "setCOC");
+  check &= checkStep(setDCSC(DischargeSCAmps, DischargeSCUnits, DischargeSCTime), "setDCSC");
+  check &= checkStep(setCBMin(CBMin), "setCBMin");
+  check &= checkStep(setCBMax(CBMax), "setCBMax");
+  check &= checkStep(setCBMaxErr(CBMaxErr), "setCBMaxErr");
+  check &= checkStep(setCBMinErr(CBMinErr), "setCBMinErr");
+  check &= checkStep(setCBOnTime(CBOnTime, CBOnTimeUnits), "setCBOnTime");
+  check &= checkStep(setCBOffTime(CBOffTime, CBOffTimeUnits), "setCBOffTime");
+  check &= checkStep(setCBUT(CBUTThreshold, CBUTRecovery), "setCBUT");
+  check &= checkStep(setCBOT(CBOTThreshold, CBOTRecovery), "setCBOT");
+  check &= checkStep(setCOT(ChargeOTThreshold, ChargeOTRecovery), "setCOT");
+  check &= checkStep(setCUT(ChargeUTThreshold, ChargeUTRecovery), "setCUT");
+  check &= checkStep(setDCOT(DisChargeOTThreshold, DisChargeOTRecovery), "setDCOT");
+  check &= checkStep(setDCUT(DisChargeUTThreshold, DisChargeUTRecovery), "setDCUT");
+  check &= checkStep(setCellCount(CELLCOUNT), "setCellCount");
+  check &= checkStep(setUp0Reg(FailShutdown, TH2Mode, TempGain, PreChargeEnable, OpenWireDisable, OpenWireShutdown), "setUp0Reg");
+  check &= checkStep(setUp1Reg(DischargeCB, ChargeCB, DischargeUV, ChargeOV, UVLockPowerDown, EndOfChargeCB), "setUp1Reg");
 
- if(enableEEPROMAccess()){
-    check = check && setOV(OVThreshold, OVRecovery, OVLock, OVChargeDetectPulseWidth) //Ponia 3000 en lock?
-     && setUV(UVThreshold, UVRecovery, UVLock, UVChargeDetectPulseWidth)
-     && setEOCThres(EndOfChargeThreshold)
-     && setLCVL(LowVoltageCharge)
-     && setOVUVTimer(OVUVTimeUnits, OVUVTimer)
-     && setDCOC(DischargeOCAmps, DisChargeOCUnits, DisChargeOCTime)
-     && setCOC(ChargeOCAmps, ChargeOCUnits, ChargeOCTime)
-     && setDCSC(DischargeSCAmps, DischargeSCUnits, DischargeSCTime)
-     && setCBMin(CBMin)
-     && setCBMax(CBMax)
-     && setCBMaxErr(CBMaxErr)
-     && setCBMinErr(CBMinErr)
-     && setCBOnTime(CBOnTime, CBOnTimeUnits)
-     && setCBOffTime(CBOffTime, CBOffTimeUnits)
-     && setCBUT(CBUTThreshold, CBUTRecovery)
-     && setCBOT(CBOTThreshold, CBOTRecovery)
-     && setCOT(ChargeOTThreshold, ChargeOTRecovery)
-     && setCUT(ChargeUTThreshold, ChargeUTRecovery)
-     && setDCOT(DisChargeOTThreshold, DisChargeOTRecovery)
-     && setDCUT(DisChargeUTThreshold, DisChargeUTRecovery)
-     && setCellCount(CELLCOUNT)
-     && setUp0Reg(FailShutdown,TH2Mode,TempGain,PreChargeEnable,OpenWireDisable,OpenWireShutdown)
-     && setUp1Reg(DischargeCB,ChargeCB,DischargeUV,ChargeOV,UVLockPowerDown,EndOfChargeCB);
-    disableEEPROMAccess();
+  checkStep(disableEEPROMAccess(),"disableEEPROMAccess");
  } else check = false;
+
+  check ? Serial.println("EEPROM configurada correctamente") : Serial.println("Fallo en la configuración de la EEPROM");
 }
 
 void loop() {
@@ -79,6 +105,14 @@ void loop() {
 }
 
 //Declaraciones de las funciones utilizadas
+bool checkStep(bool result, const char* stepName) {
+  if (!result) {
+    Serial.print("ERROR al configurar: ");
+    Serial.println(stepName);
+  }
+  return result;
+}
+
 bool writeReg(uint8_t reg, uint8_t value){
   if (reg > 0xAB) return false;
   Wire.beginTransmission(ISLADDR);
@@ -88,20 +122,20 @@ bool writeReg(uint8_t reg, uint8_t value){
   return true;
 }
 
-uint8_t readReg(uint8_t reg){ //0xFF se usa como código de error
-  Wire.beginTransmission(ISLADDR);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) return 0xFF;  
-
-  Wire.requestFrom(ISLADDR, 1); // 1 byte
-  if (Wire.available()) return Wire.read(); //Devuelve un entero con el número de bytes disponibles
-  else return 0xFF;
+bool readReg(uint8_t reg, uint8_t &val){
+    Wire.beginTransmission(ISLADDR);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0) return false; // Error en la transmisión I2C
+    if (Wire.requestFrom((uint8_t)ISLADDR, (uint8_t)1) != 1) return false; // El ISL94202 no respondió con el byte solicitado  
+    val = Wire.read(); // Solo modifica 'val' si la lectura fue exitosa
+    return true;       // Lectura correcta
 }
 
-//P148 DATASHEET ISL94202
-bool writeEEPROM(uint8_t reg, uint16_t value) { //Funciona hasta dos bytes
-    if (reg > 0x4B) // Comprueba los límites de los registros EEPROM
-        return false;
+//P148 DATASHEET ISL94202. Tiempos aumentados ligeramente por tolerancias
+bool writeEEPROM(uint8_t reg, uint16_t value, bool is16Bit) { //Funciona hasta dos bytes
+    if (reg > 0x4B){ // Comprueba los límites de los registros EEPROM
+    Serial.println("Fallo 1");
+        return false;}
 
     uint8_t base = reg & 0xFC; //Redonde al byte de la primera página
     uint8_t buffer[4];
@@ -112,13 +146,21 @@ bool writeEEPROM(uint8_t reg, uint16_t value) { //Funciona hasta dos bytes
         Wire.beginTransmission(ISLADDR);
         Wire.write((uint8_t)(base + i));
         Wire.endTransmission(false);
-        if (i == 0) delay(1); // 1ms de recargar la página
+        if (i == 0) delay(2); // 2ms de recargar la página
         Wire.requestFrom(ISLADDR, 1);
         if (Wire.available()) buffer[i] = Wire.read(); //Llena el buffer con las lecturas pervias de la EEPROM
+        else{
+          Serial.println("Fallo 2");
+          return false;
+        } 
     }
-    buffer[reg & 0x03] = value & 0x00FF; //Cambia la posición del bit deseado, usando solo el último byte
+    
+    // Cambia la posición del bit deseado, usando solo el último byte
     // 0x03=00000011 -> reg & 0xFC selecciona la página -> 0x03 selecciona la posición
-    if((value & 0xFF00) > 0) buffer[(reg & 0x03) + 1] = value >> 8 ;
+    uint8_t offset = reg & 0x03;
+    buffer[offset] = value & 0xFF; // Byte bajo
+    if (is16Bit && offset < 3) buffer[offset + 1] = (uint8_t)(value >> 8) & 0xFF; // Byte alto
+
 
     // Escribe el primer byte dos veces
     for(uint8_t i = 0; i<2; i++){
@@ -126,7 +168,7 @@ bool writeEEPROM(uint8_t reg, uint16_t value) { //Funciona hasta dos bytes
       Wire.write(base);
       Wire.write(buffer[0]);
       Wire.endTransmission(true);
-      delay(30);
+      delay(40);
     }
 
     // Escribe los bytes restantes
@@ -135,9 +177,22 @@ bool writeEEPROM(uint8_t reg, uint16_t value) { //Funciona hasta dos bytes
         Wire.write((uint8_t)(base + i));
         Wire.write(buffer[i]);
         Wire.endTransmission(true);
-        delay(30);
+        delay(40);
     }
-    return value == readReg(reg);
+
+   //Compara el resultado con el objetivo
+   delay(10); // Pausa de estabilización para la RAM
+   uint8_t lowByte = 0, highByte = 0;
+   // Intenta leer el byte bajo
+   if (!readReg(reg, lowByte)) return false;
+   uint16_t readValue = lowByte;
+   // Si es un registro de 16 bits, lee el byte alto
+   if (is16Bit) {
+       if (!readReg(reg + 1, highByte)) return false;
+       readValue |= ((uint16_t)highByte << 8);
+   }
+   if(!(readValue == value)) Serial.println("Fallo 2");
+   return (readValue == value);
 }
 
 //P148 DATASHEET ISL94202
@@ -150,19 +205,31 @@ bool disableEEPROMAccess(){return writeReg(0x89, 0x00) && writeReg(0x87, 0x00) &
 } 
 
 //Para escribir en los registros es necesario convertir su contenido a binario
-uint16_t CELLmVtoHEX(uint16_t mV){return (mV*1000*3*4095)/(1.8*8);}
-uint16_t CELLHEXtomV(uint16_t code){return (code*1.8*8*1000)/(4095*3);}
+uint16_t CELLmVtoHEX(uint16_t mV){
+  float hex = ((float)mV * 3.0 * 4095.0) / (1000.0 * 8.0 * 1.8);
+  return (uint16_t)hex;
+}
+uint16_t CELLHEXtomV(uint16_t code){
+  float mV = ((float)code * 1.8 * 8.0 * 1000.0) / (4095.0 * 3.0);
+  return (uint16_t)mV;
+}
 
-uint16_t THmVtoHEX(uint16_t mV){return (mV*1000*4095)/(1.8);}
-uint16_t THHEXtomV(uint16_t code){return (code*1.8*1000)/(4095);}
+uint16_t THmVtoHEX(uint16_t mV){
+  float hex = ((float)mV * 4095.0) / (1000.0 * 1.8);
+  return (uint16_t)hex;
+}
+uint16_t THHEXtomV(uint16_t code){
+  float mV = ((float)code * 1.8 * 1000.0) / 4095.0;
+  return (uint16_t)mV;
+}
 
 //P35-36, P38 DATASHEET ISL94202
 //Contiene el umbral, la recuperación, el bloqueo de sobretensión
 //Contiene además el pulso de detección de carga (charge) (CPWD)
 bool setOV(uint16_t thres, uint16_t recov, uint16_t lock, uint8_t CPWD){ 
-  if (recov>thres || thres>lock || CPWD>15) return false;
+ // if (recov>thres || thres>lock || CPWD>15) return false;
   uint16_t code[3];
-  code[0]=CPWD<<12 | CELLmVtoHEX(thres);
+  code[0]=(uint16_t)CPWD<<12 | CELLmVtoHEX(thres);
   code[1]=CELLmVtoHEX(recov);
   code[2]=CELLmVtoHEX(lock);
   return writeEEPROM(OVThresADDR, code[0]) && writeEEPROM(OVRecovADDR, code[1]) && writeEEPROM(OVLockADDR, code[2]);
@@ -172,9 +239,9 @@ bool setOV(uint16_t thres, uint16_t recov, uint16_t lock, uint8_t CPWD){
 //Contiene el umbral, la recuperación, el bloqueo de subtensión
 //Contiene además el pulso de detección de carga (load) (LDPW)
 bool setUV(uint16_t thres, uint16_t recov, uint16_t lock, uint8_t LDPW){ 
-  if (recov<thres || thres<lock || LDPW>15) return false;
+ // if (recov<thres || thres<lock || LDPW>15) return false;
   uint16_t code[3];
-  code[0]=LDPW<<12 | CELLmVtoHEX(thres);
+  code[0]=(uint16_t)LDPW<<12 | CELLmVtoHEX(thres);
   code[1]=CELLmVtoHEX(recov);
   code[2]=CELLmVtoHEX(lock);
   return writeEEPROM(UVThresADDR, code[0]) && writeEEPROM(UVRecovADDR, code[1]) && writeEEPROM(UVLockADDR, code[2]);
@@ -251,7 +318,7 @@ bool setDCSC(uint16_t A, uint8_t TU, uint8_t Timing){
 //P49 DATASHEET ISL94202
 //Deshabilita el equilibrio de las celdas si están por debajo de este umbral
 bool setCBMin(uint16_t mV){
-  if (mV>CELLHEXtomV(4095)) return false;
+//  if (mV>CELLHEXtomV(4095)) return false;
   uint16_t code = CELLmVtoHEX(mV);
   return writeEEPROM(CBMinADDR, code);
 }
@@ -259,7 +326,7 @@ bool setCBMin(uint16_t mV){
 //P50 DATASHEET ISL94202
 //Deshabilita el equilibrio de las celdas si están por encima de este umbral
 bool setCBMax(uint16_t mV){
-  if (mV>CELLHEXtomV(4095)) return false;
+ // if (mV>CELLHEXtomV(4095)) return false;
   uint16_t code = CELLmVtoHEX(mV);
   return writeEEPROM(CBMaxADDR, code);
 }
@@ -293,15 +360,15 @@ bool setCBOnTime(uint16_t ms, uint8_t TU){
 //Tiempo que permanece encendido el equilibrado en cada ciclo
 //Se programa con las unidades (Definidas en ISL94202Config.h) y el valor
 bool setCBOffTime(uint16_t ms, uint8_t TU){ 
-  if (ms>1023 || TU > 0b11) return false;
+ // if (ms>1023 || TU > 0b11) return false;
   uint16_t code = TU<<10 | ms;
-  return writeEEPROM(CBOnTimADDR, code);
+  return writeEEPROM(CBOffTimADDR, code);
 }
 
 //P53 DATASHEET ISL94202
 //Deshabilita el equilibrado en temperaturas bajas. Presenta umbral y recuperación
 bool setCBUT(uint16_t thres, uint16_t recov){ 
-  if (recov<thres) return false;
+//  if (recov<thres) return false;
   uint16_t code[2];
   code[0]=THmVtoHEX(thres);
   code[1]=THmVtoHEX(recov);
@@ -311,7 +378,7 @@ bool setCBUT(uint16_t thres, uint16_t recov){
 //P55 DATASHEET ISL94202
 //Deshabilita el equilibrado en temperaturas altas. Presenta umbral y recuperación
 bool setCBOT(uint16_t thres, uint16_t recov){ 
-  if (recov>thres) return false;
+ // if (recov>thres) return false;
   uint16_t code[2];
   code[0]=THmVtoHEX(thres);
   code[1]=THmVtoHEX(recov);
@@ -321,7 +388,7 @@ bool setCBOT(uint16_t thres, uint16_t recov){
 //P57 DATASHEET ISL94202
 //Define la sobretemperatura en la carga con su umbral y su recuperación
 bool setCOT(uint16_t thres, uint16_t recov){ 
-  if (recov>thres) return false;
+ // if (recov>thres) return false;
   uint16_t code[2];
   code[0]=THmVtoHEX(thres);
   code[1]=THmVtoHEX(recov);
@@ -331,7 +398,7 @@ bool setCOT(uint16_t thres, uint16_t recov){
 //P58 DATASHEET ISL94202
 //Define la subtemperatura en la carga con su umbral y su recuperación
 bool setCUT(uint16_t thres, uint16_t recov){ 
-  if (recov<thres) return false;
+ // if (recov<thres) return false;
   uint16_t code[2];
   code[0]=THmVtoHEX(thres);
   code[1]=THmVtoHEX(recov);
@@ -341,7 +408,7 @@ bool setCUT(uint16_t thres, uint16_t recov){
 //P59 DATASHEET ISL94202
 //Define la subtemperatura en la descarga con su umbral y su recuperación
 bool setDCOT(uint16_t thres, uint16_t recov){ 
-  if (recov>thres) return false;
+ // if (recov>thres) return false;
   uint16_t code[2];
   code[0]=THmVtoHEX(thres);
   code[1]=THmVtoHEX(recov);
@@ -351,7 +418,7 @@ bool setDCOT(uint16_t thres, uint16_t recov){
 //P61 DATASHEET ISL94202
 //Define la subtemperatura en la descarga con su umbral y su recuperación
 bool setDCUT(uint16_t thres, uint16_t recov){ 
-  if (recov<thres) return false;
+//  if (recov<thres) return false;
   uint16_t code[2];
   code[0]=THmVtoHEX(thres);
   code[1]=THmVtoHEX(recov);
@@ -370,19 +437,19 @@ if (!(n == 3 || n == 4 || n == 7 || n == 8)) return false;
     case 7: code = 0xEF; break;
     case 8: code = 0xFF; break;
   }
-  return writeEEPROM(CellCountADDR, code);
+  return writeEEPROM(CellCountADDR, code, false);
 }
 
 //P67 DATASHEET ISL94202
 //Contiene configuraciones en bits que habilitan/deshabilitan operaciones o controles.
 bool setUp0Reg(bool PSD, bool XT2M, bool TGAIN, bool PCFETE, bool DOWD, bool OWPSD){
   uint8_t code = PSD << 7 | XT2M << 5| TGAIN << 4 | PCFETE << 2 | DOWD << 1 | OWPSD;
-return writeEEPROM(SetUp0, code);
+return writeEEPROM(SetUp0, code, false);
 }
 
 //68 DATASHEET ISL94202
 //Contiene configuraciones en bits que habilitan/deshabilitan operaciones o controles.
 bool setUp1Reg(bool CBDD, bool CBDC, bool DFODUV, bool CFODOV, bool UVLOPD, bool CB_EOC){
   uint8_t code = CBDD << 7 | CBDC << 6| DFODUV << 5 | CFODOV << 4 | UVLOPD << 3 | CB_EOC;
-return writeEEPROM(SetUp1, code);
+return writeEEPROM(SetUp1, code, false);
 }
