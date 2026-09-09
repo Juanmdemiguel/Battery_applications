@@ -28,7 +28,6 @@ bool BMS::oneByteRead(uint8_t ADDR, uint8_t &data) {
   Wire.write(ADDR);
   if (Wire.endTransmission(false) != 0) return false;
   if (Wire.requestFrom((uint8_t)ISLADDR, (uint8_t)1) != 1) return false;
-
   data = Wire.read();
   return true;
 }

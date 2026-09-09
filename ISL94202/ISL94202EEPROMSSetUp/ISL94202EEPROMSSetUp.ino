@@ -8,7 +8,10 @@ bool check=true; //Flag que indica consecución del código
 bool checkStep(bool result, const char* stepName);
 bool writeReg(uint8_t reg, uint8_t value);
 bool readReg(uint8_t reg, uint8_t &val);
+bool waitEEPROMReady(uint16_t timeout_ms = 50);
 bool writeEEPROM(uint8_t reg, uint16_t value,bool is16Bit=true);
+bool writeByteEEPROM(uint8_t addr, uint8_t data);
+bool readEEPROMPage(uint8_t base, uint8_t buffer[4]);
 bool enableEEPROMAccess();
 bool disableEEPROMAccess();
 uint16_t CELLmVtoHEX(uint16_t mV);
@@ -38,6 +41,8 @@ bool setDCUT(uint16_t thres, uint16_t recov);
 bool setCellCount(uint16_t n);
 bool setUp0Reg(bool PSD = 0, bool XT2M = 0, bool TGAIN = 0, bool PCFETE = 0, bool DOWD = 0, bool OWPSD = 0);
 bool setUp1Reg(bool CBDD = 0, bool CBDC = 1, bool DFODUV = 0, bool CFODOV = 0, bool UVLOPD = 0, bool CB_EOC = 0);
+void printFaults();
+bool checkEEPROMWriteReady();
 
 void setup() {
  Serial.begin(115200); 
@@ -58,6 +63,7 @@ void setup() {
       5-> Tiempo de espera agotado */
   if (err==0) {
       Serial.println("BMS detectado correctamente.");
+      Serial.println(" ");
     } else {
       Serial.print("Código de error: "); Serial.println(err);
       Serial.println("Error I2C: BMS no encontrado.");
@@ -68,8 +74,11 @@ void setup() {
         delay(500);
       } 
   }
+
+   printFaults();
 if (checkStep(enableEEPROMAccess(),"enableEEPROMAccess")) {
   check = true;
+  check &= checkEEPROMWriteReady();
   check &= checkStep(setOV(OVThreshold, OVRecovery, OVLock, OVChargeDetectPulseWidth), "setOV");
   check &= checkStep(setUV(UVThreshold, UVRecovery, UVLock, UVChargeDetectPulseWidth), "setUV");
   check &= checkStep(setEOCThres(EndOfChargeThreshold), "setEOCThres");
@@ -109,89 +118,145 @@ bool checkStep(bool result, const char* stepName) {
   if (!result) {
     Serial.print("ERROR al configurar: ");
     Serial.println(stepName);
+    Serial.println(" ");
+  } else{
+    Serial.print(stepName);
+    Serial.println(" configurado correctamente");
+    Serial.println(" ");
   }
   return result;
 }
 
 bool writeReg(uint8_t reg, uint8_t value){
+  //uint8_t res;
   if (reg > 0xAB) return false;
   Wire.beginTransmission(ISLADDR);
   Wire.write(reg);
   Wire.write(value);
   if (Wire.endTransmission() != 0) return false;
+  delay(5);
+  //readReg(reg, res);
+  //if (res!=value) return false;
   return true;
 }
 
-bool readReg(uint8_t reg, uint8_t &val){
+bool readReg(uint8_t ADDR, uint8_t &val){
     Wire.beginTransmission(ISLADDR);
-    Wire.write(reg);
+    Wire.write(ADDR);
     if (Wire.endTransmission(false) != 0) return false; // Error en la transmisión I2C
     if (Wire.requestFrom((uint8_t)ISLADDR, (uint8_t)1) != 1) return false; // El ISL94202 no respondió con el byte solicitado  
     val = Wire.read(); // Solo modifica 'val' si la lectura fue exitosa
     return true;       // Lectura correcta
 }
 
-//P148 DATASHEET ISL94202. Tiempos aumentados ligeramente por tolerancias
+bool waitEEPROMReady(uint16_t timeout_ms) {
+    uint32_t start = millis();
+    while (millis() - start < timeout_ms) {
+        Wire.beginTransmission(ISLADDR);
+        if (Wire.endTransmission() == 0) return true; // ACK -> listo
+        delay(1);
+    }
+    return false; // timeout, algo va mal
+}
+
+bool writeByteEEPROM(uint8_t addr, uint8_t data) {
+    Wire.beginTransmission(ISLADDR);
+    Wire.write(addr);
+    Wire.write(data);
+    if (Wire.endTransmission(true) != 0) {
+        Serial.println("Fallo escritura I2C (NACK)");
+        return false;
+    }
+    if (!waitEEPROMReady()) {
+        Serial.println("Fallo timeout escritura EEPROM");
+        return false;
+    }
+    return true;
+}
+
+bool readEEPROMPage(uint8_t base, uint8_t buffer[4]) {
+    // El datasheet indica que puede ser necesario leer la página completa
+    // dos veces si el primer byte cae en el recall (>200µs) de una página nueva
+    for (uint8_t i = 0; i < 4; i++) {
+    Wire.beginTransmission(ISLADDR);
+    Wire.write((uint8_t)(base + i));
+    Wire.endTransmission(false);
+    if (i == 0) {
+      delay(1);
+      Wire.requestFrom(ISLADDR, 1);
+      if (Wire.available()) Wire.read(); // descarte del recall
+      else return false; 
+      Wire.beginTransmission(ISLADDR);
+      Wire.write((uint8_t)(base + i));
+      Wire.endTransmission(false);
+    }
+    Wire.requestFrom(ISLADDR, 1);
+    if (Wire.available()) buffer[i] = Wire.read();
+    else return false;
+} return true;
+}
+
+//P148 DATASHEET ISL94202.
 bool writeEEPROM(uint8_t reg, uint16_t value, bool is16Bit) { //Funciona hasta dos bytes
     if (reg > 0x4B){ // Comprueba los límites de los registros EEPROM
-    Serial.println("Fallo 1");
-        return false;}
+    Serial.println("Fallo 1"); return false;}
 
     uint8_t base = reg & 0xFC; //Redonde al byte de la primera página
     uint8_t buffer[4];
 
     // Lecturas de un byte
-    // El primer byte recarga la página (>200µs)
-    for (uint8_t i = 0; i < 4; i++) {
-        Wire.beginTransmission(ISLADDR);
-        Wire.write((uint8_t)(base + i));
-        Wire.endTransmission(false);
-        if (i == 0) delay(2); // 2ms de recargar la página
-        Wire.requestFrom(ISLADDR, 1);
-        if (Wire.available()) buffer[i] = Wire.read(); //Llena el buffer con las lecturas pervias de la EEPROM
-        else{
-          Serial.println("Fallo 2");
-          return false;
-        } 
-    }
-    
+    if (!readEEPROMPage(base, buffer)) { Serial.println("Fallo 2"); return false; }
+    /*
+    Serial.print("reg=0x"); Serial.print(reg, HEX);
+    Serial.print(" base=0x"); Serial.print(base, HEX);
+    Serial.print(" buffer recién leído=[");
+    for (int i=0;i<4;i++){ Serial.print(buffer[i],HEX); Serial.print(" "); }
+    Serial.println("]");*/
+
     // Cambia la posición del bit deseado, usando solo el último byte
     // 0x03=00000011 -> reg & 0xFC selecciona la página -> 0x03 selecciona la posición
     uint8_t offset = reg & 0x03;
     buffer[offset] = value & 0xFF; // Byte bajo
     if (is16Bit && offset < 3) buffer[offset + 1] = (uint8_t)(value >> 8) & 0xFF; // Byte alto
 
+  
+    uint16_t readValue = buffer[offset];
+   /*if (is16Bit && offset < 3) readValue |= ((uint16_t)buffer[offset + 1] << 8);
+    Serial.print("reg=0x"); Serial.print(reg, HEX);
+    Serial.print(" base=0x"); Serial.print(base, HEX);
+    Serial.print(" leido=0x"); Serial.print(readValue, HEX);
+    Serial.print(" buffer pre escritura=[");
+    for (int i=0;i<4;i++){ Serial.print(buffer[i],HEX); Serial.print(" "); }
+    Serial.println("]");*/
+
 
     // Escribe el primer byte dos veces
-    for(uint8_t i = 0; i<2; i++){
-      Wire.beginTransmission(ISLADDR);
-      Wire.write(base);
-      Wire.write(buffer[0]);
-      Wire.endTransmission(true);
-      delay(40);
+    for (uint8_t i = 0; i < 2; i++) {
+      if (!writeByteEEPROM(base, buffer[0])) return false;
+      delay(30);
     }
-
     // Escribe los bytes restantes
     for (uint8_t i = 1; i < 4; i++) {
-        Wire.beginTransmission(ISLADDR);
-        Wire.write((uint8_t)(base + i));
-        Wire.write(buffer[i]);
-        Wire.endTransmission(true);
-        delay(40);
+        if (!writeByteEEPROM((uint8_t)(base + i), buffer[i])) return false;
+        delay(30);
     }
 
-   //Compara el resultado con el objetivo
-   delay(10); // Pausa de estabilización para la RAM
-   uint8_t lowByte = 0, highByte = 0;
-   // Intenta leer el byte bajo
-   if (!readReg(reg, lowByte)) return false;
-   uint16_t readValue = lowByte;
-   // Si es un registro de 16 bits, lee el byte alto
-   if (is16Bit) {
-       if (!readReg(reg + 1, highByte)) return false;
-       readValue |= ((uint16_t)highByte << 8);
-   }
-   if(!(readValue == value)) Serial.println("Fallo 2");
+ // Se vuelve a realizar la lectura, para observar si se ha almacenado correctamente
+    // El primer byte recarga la página (>200µs)
+    if (!readEEPROMPage(base, buffer)) { Serial.println("Fallo 3"); return false; }
+  
+  
+    readValue = buffer[offset];
+   if (is16Bit && offset < 3) readValue |= ((uint16_t)buffer[offset + 1] << 8);
+   //Comprobación del resultado
+  /* Serial.print("reg=0x"); Serial.print(reg, HEX);
+    Serial.print(" base=0x"); Serial.print(base, HEX);
+    Serial.print(" esperado=0x"); Serial.print(value, HEX);
+    Serial.print(" leido=0x"); Serial.print(readValue, HEX);
+    Serial.print(" buffer=[");
+    for (int i=0;i<4;i++){ Serial.print(buffer[i],HEX); Serial.print(" "); }
+    Serial.println("]");*/
+   if(!(readValue == value)) Serial.println("Fallo 6");
    return (readValue == value);
 }
 
@@ -201,7 +266,7 @@ bool enableEEPROMAccess(){return writeReg(0x88, 0x01) && writeReg(0x87, 0x04) &&
   writeReg(0x44, 0x00) && writeReg(0x45, 0x00) && writeReg(0x89, 0x01);
 }
 bool disableEEPROMAccess(){return writeReg(0x89, 0x00) && writeReg(0x87, 0x00) &&  
-  writeReg(0x44, 0x00) && writeReg(0x45, 0x00); //0x44-45 se necesitan cambiar al valor deseado
+  writeReg(0x44, 0xAA) && writeReg(0x45, 0x06);
 } 
 
 //Para escribir en los registros es necesario convertir su contenido a binario
@@ -452,4 +517,52 @@ return writeEEPROM(SetUp0, code, false);
 bool setUp1Reg(bool CBDD, bool CBDC, bool DFODUV, bool CFODOV, bool UVLOPD, bool CB_EOC){
   uint8_t code = CBDD << 7 | CBDC << 6| DFODUV << 5 | CFODOV << 4 | UVLOPD << 3 | CB_EOC;
 return writeEEPROM(SetUp1, code, false);
+}
+
+void printFaults() {
+    uint8_t stat1,stat2;
+    readReg(0x80,stat1);
+    readReg(0x81,stat2);
+
+    if (stat1 == 0 && stat2 == 0) {Serial.println("Sin fallos activos."); Serial.println(""); return;}
+    Serial.println("--- FALLOS DETECTADOS ---");
+    // Registro 0x80 (STAT1)
+    if (stat1 & (1 << 7)) Serial.println("[0x80.7] Cable abierto (OW)");
+    if (stat1 & (1 << 6)) Serial.println("[0x80.6] Subtensión de celda (UV)");
+    if (stat1 & (1 << 5)) Serial.println("[0x80.5] Sobretensión de celda (OV)");
+    if (stat1 & (1 << 4)) Serial.println("[0x80.4] Tensión críticamente baja (LV)");
+    if (stat1 & (1 << 3)) Serial.println("[0x80.3] Subtensión interna (UVLO)");
+
+    // Registro 0x81 (STAT2)
+    if (stat2 & (1 << 7)) Serial.println("[0x81.7] Sobretemperatura de celda (OT)");
+    if (stat2 & (1 << 6)) Serial.println("[0x81.6] Subtemperatura de celda (UT)");
+    if (stat2 & (1 << 5)) Serial.println("[0x81.5] Sobretemperatura interna (IOT)");
+    if (stat2 & (1 << 4)) Serial.println("[0x81.4] Sobrecorriente en carga (OCC)");
+    if (stat2 & (1 << 3)) Serial.println("[0x81.3] Sobrecorriente en descarga (OCD)");
+    if (stat2 & (1 << 2)) Serial.println("[0x81.2] Cortocircuito en descarga (SCD)");
+    Serial.println("-------------------------");
+}
+
+bool checkEEPROMWriteReady() {
+    bool ready = true;
+    Serial.println("--- DIAGNÓSTICO PREVIO A ESCRITURA EEPROM ---");
+    //Verificar el bit EEEN (EEPROM Enable) en el registro Control 1 (0x8E, Bit 4)
+    uint8_t ctrl1;
+     readReg(0x89, ctrl1);
+    if (!(ctrl1 & (1 << 0))) {
+        Serial.println("[ERROR] Bit EEEN (0x89.0) está desactivado. Habilita la escritura en RAM antes de intentar el grabado.");
+        ready = false;
+    } else {
+        Serial.println("[OK] Bit EEEN habilitado.");
+    }
+    //Verificar presencia de carga o cargador en STAT0 (0x82)
+    uint8_t stat0;
+    readReg(0x82, stat0);
+    if (stat0 & (1 << 0)) { // Bit CHG_DET / PACK
+        Serial.println("[ERROR] Cargador/Carga detectada (0x82). Desconecta el paquete antes de grabar.");
+        ready = false;
+    }
+    if (ready) Serial.println("[OK] El ISL94202 cumple con todos los requisitos para grabar la EEPROM.");
+    Serial.println("");
+    return ready;
 }
