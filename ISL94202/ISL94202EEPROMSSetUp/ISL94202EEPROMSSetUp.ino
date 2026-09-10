@@ -3,6 +3,7 @@
 #include "ISL94202Config.h"
 
 bool check=true; //Flag que indica consecución del código
+enum BMSMode { MODE_NORMAL, MODE_IDLE, MODE_DOZE, MODE_SLEEP, MODE_POWERDOWN, MODE_UNKNOWN };
 
 //Prototipos de las funciones utilizadas
 bool checkStep(bool result, const char* stepName);
@@ -41,8 +42,10 @@ bool setDCUT(uint16_t thres, uint16_t recov);
 bool setCellCount(uint16_t n);
 bool setUp0Reg(bool PSD = 0, bool XT2M = 0, bool TGAIN = 0, bool PCFETE = 0, bool DOWD = 0, bool OWPSD = 0);
 bool setUp1Reg(bool CBDD = 0, bool CBDC = 1, bool DFODUV = 0, bool CFODOV = 0, bool UVLOPD = 0, bool CB_EOC = 0);
-void printFaults();
+bool printFaults();
 bool checkEEPROMWriteReady();
+BMSMode getMode();
+bool waitForLowPowerState(uint16_t timeout_ms = 50);
 
 void setup() {
  Serial.begin(115200); 
@@ -50,7 +53,7 @@ void setup() {
   delay(1000);
   Serial.println("Iniciando sistema BMS...");
   Wire.begin(); //Init as master -> teensy: 18 SDA0, 19 SCL0
-  Wire.setClock(100000);
+  Wire.setClock(50000);
   Wire.beginTransmission(ISLADDR);
 
   uint8_t err=Wire.endTransmission();
@@ -75,7 +78,6 @@ void setup() {
       } 
   }
 
-   printFaults();
 if (checkStep(enableEEPROMAccess(),"enableEEPROMAccess")) {
   check = true;
   check &= checkEEPROMWriteReady();
@@ -119,12 +121,7 @@ bool checkStep(bool result, const char* stepName) {
     Serial.print("ERROR al configurar: ");
     Serial.println(stepName);
     Serial.println(" ");
-  } else{
-    Serial.print(stepName);
-    Serial.println(" configurado correctamente");
-    Serial.println(" ");
-  }
-  return result;
+  } return result;
 }
 
 bool writeReg(uint8_t reg, uint8_t value){
@@ -156,46 +153,55 @@ bool waitEEPROMReady(uint16_t timeout_ms) {
         if (Wire.endTransmission() == 0) return true; // ACK -> listo
         delay(1);
     }
-    return false; // timeout, algo va mal
+    return false; //Timeout
 }
 
 bool writeByteEEPROM(uint8_t addr, uint8_t data) {
-    Wire.beginTransmission(ISLADDR);
-    Wire.write(addr);
-    Wire.write(data);
+     Wire.beginTransmission(ISLADDR);
+     Wire.write(addr);
+     Wire.write(data);
     if (Wire.endTransmission(true) != 0) {
         Serial.println("Fallo escritura I2C (NACK)");
-        return false;
-    }
-    if (!waitEEPROMReady()) {
-        Serial.println("Fallo timeout escritura EEPROM");
         return false;
     }
     return true;
 }
 
 bool readEEPROMPage(uint8_t base, uint8_t buffer[4]) {
-    // El datasheet indica que puede ser necesario leer la página completa
-    // dos veces si el primer byte cae en el recall (>200µs) de una página nueva
     for (uint8_t i = 0; i < 4; i++) {
-    Wire.beginTransmission(ISLADDR);
-    Wire.write((uint8_t)(base + i));
-    Wire.endTransmission(false);
-    if (i == 0) {
-      delay(1);
-      Wire.requestFrom(ISLADDR, 1);
-      if (Wire.available()) Wire.read(); // descarte del recall
-      else return false; 
-      Wire.beginTransmission(ISLADDR);
-      Wire.write((uint8_t)(base + i));
-      Wire.endTransmission(false);
-    }
-    Wire.requestFrom(ISLADDR, 1);
-    if (Wire.available()) buffer[i] = Wire.read();
-    else return false;
-} return true;
-}
 
+      bool ok = false;
+      for (uint8_t attempt = 0; attempt < 3 && !ok; attempt++) {
+        waitForLowPowerState(); // única sincronización, ANTES de empezar la secuencia atómica
+
+        Wire.beginTransmission(ISLADDR);
+        Wire.write((uint8_t)(base + i));
+        uint8_t err = Wire.endTransmission(false);
+        if (err != 0) { delay(2); continue; }
+
+        if (i == 0) {
+          delay(3);
+          uint8_t n = Wire.requestFrom((uint8_t)ISLADDR, (uint8_t)1); // sin waitForLowPowerState aquí
+          if (n != 1) { delay(2); continue; }
+          Wire.read(); // descarte del recall
+
+          // reabrir dirección para el dato real - sigue siendo parte de la MISMA secuencia
+          Wire.beginTransmission(ISLADDR);
+          Wire.write((uint8_t)(base + i));
+          err = Wire.endTransmission(false);
+          if (err != 0) { delay(2); continue; }
+        }
+
+        uint8_t n = Wire.requestFrom((uint8_t)ISLADDR, (uint8_t)1); // sin waitForLowPowerState aquí tampoco
+        if (n != 1) { delay(2); continue; }
+        buffer[i] = Wire.read();
+        ok = true;
+      }
+
+      if (!ok) return false;
+    }
+    return true;
+}
 //P148 DATASHEET ISL94202.
 bool writeEEPROM(uint8_t reg, uint16_t value, bool is16Bit) { //Funciona hasta dos bytes
     if (reg > 0x4B){ // Comprueba los límites de los registros EEPROM
@@ -206,8 +212,8 @@ bool writeEEPROM(uint8_t reg, uint16_t value, bool is16Bit) { //Funciona hasta d
 
     // Lecturas de un byte
     if (!readEEPROMPage(base, buffer)) { Serial.println("Fallo 2"); return false; }
-    /*
-    Serial.print("reg=0x"); Serial.print(reg, HEX);
+    
+   /* Serial.print("reg=0x"); Serial.print(reg, HEX);
     Serial.print(" base=0x"); Serial.print(base, HEX);
     Serial.print(" buffer recién leído=[");
     for (int i=0;i<4;i++){ Serial.print(buffer[i],HEX); Serial.print(" "); }
@@ -221,8 +227,8 @@ bool writeEEPROM(uint8_t reg, uint16_t value, bool is16Bit) { //Funciona hasta d
 
   
     uint16_t readValue = buffer[offset];
-   /*if (is16Bit && offset < 3) readValue |= ((uint16_t)buffer[offset + 1] << 8);
-    Serial.print("reg=0x"); Serial.print(reg, HEX);
+   if (is16Bit && offset < 3) readValue |= ((uint16_t)buffer[offset + 1] << 8);
+  /*  Serial.print("reg=0x"); Serial.print(reg, HEX);
     Serial.print(" base=0x"); Serial.print(base, HEX);
     Serial.print(" leido=0x"); Serial.print(readValue, HEX);
     Serial.print(" buffer pre escritura=[");
@@ -231,6 +237,7 @@ bool writeEEPROM(uint8_t reg, uint16_t value, bool is16Bit) { //Funciona hasta d
 
 
     // Escribe el primer byte dos veces
+   // Escribe el primer byte dos veces
     for (uint8_t i = 0; i < 2; i++) {
       if (!writeByteEEPROM(base, buffer[0])) return false;
       delay(30);
@@ -240,16 +247,14 @@ bool writeEEPROM(uint8_t reg, uint16_t value, bool is16Bit) { //Funciona hasta d
         if (!writeByteEEPROM((uint8_t)(base + i), buffer[i])) return false;
         delay(30);
     }
-
  // Se vuelve a realizar la lectura, para observar si se ha almacenado correctamente
     // El primer byte recarga la página (>200µs)
     if (!readEEPROMPage(base, buffer)) { Serial.println("Fallo 3"); return false; }
   
-  
     readValue = buffer[offset];
    if (is16Bit && offset < 3) readValue |= ((uint16_t)buffer[offset + 1] << 8);
    //Comprobación del resultado
-  /* Serial.print("reg=0x"); Serial.print(reg, HEX);
+   /*Serial.print("reg=0x"); Serial.print(reg, HEX);
     Serial.print(" base=0x"); Serial.print(base, HEX);
     Serial.print(" esperado=0x"); Serial.print(value, HEX);
     Serial.print(" leido=0x"); Serial.print(readValue, HEX);
@@ -512,57 +517,89 @@ bool setUp0Reg(bool PSD, bool XT2M, bool TGAIN, bool PCFETE, bool DOWD, bool OWP
 return writeEEPROM(SetUp0, code, false);
 }
 
-//68 DATASHEET ISL94202
+//P68 DATASHEET ISL94202
 //Contiene configuraciones en bits que habilitan/deshabilitan operaciones o controles.
 bool setUp1Reg(bool CBDD, bool CBDC, bool DFODUV, bool CFODOV, bool UVLOPD, bool CB_EOC){
   uint8_t code = CBDD << 7 | CBDC << 6| DFODUV << 5 | CFODOV << 4 | UVLOPD << 3 | CB_EOC;
 return writeEEPROM(SetUp1, code, false);
 }
 
-void printFaults() {
-    uint8_t stat1,stat2;
-    readReg(0x80,stat1);
-    readReg(0x81,stat2);
+//Una condición para escribir en la EEPROM es la ausencia de fallos
+bool printFaults() {
+    uint8_t stat0,stat1;
+    readReg(0x80,stat0);
+    readReg(0x81,stat1);
 
-    if (stat1 == 0 && stat2 == 0) {Serial.println("Sin fallos activos."); Serial.println(""); return;}
+    if (stat0 == 0 && stat1 == 0)  return false;
     Serial.println("--- FALLOS DETECTADOS ---");
-    // Registro 0x80 (STAT1)
-    if (stat1 & (1 << 7)) Serial.println("[0x80.7] Cable abierto (OW)");
-    if (stat1 & (1 << 6)) Serial.println("[0x80.6] Subtensión de celda (UV)");
-    if (stat1 & (1 << 5)) Serial.println("[0x80.5] Sobretensión de celda (OV)");
-    if (stat1 & (1 << 4)) Serial.println("[0x80.4] Tensión críticamente baja (LV)");
-    if (stat1 & (1 << 3)) Serial.println("[0x80.3] Subtensión interna (UVLO)");
+    // Registro 0x80 (STAT0) P71 DATASHEET ISL94202
+    if (stat0 & (1 << 7)) Serial.println("[0x80.7] Subtemperatura en carga (CUTF)");
+    if (stat0 & (1 << 6)) Serial.println("[0x80.6] Sobretemperatura en carga (COTF)");
+    if (stat0 & (1 << 5)) Serial.println("[0x80.5] Subtemperarura en la descarga (DUTF)");
+    if (stat0 & (1 << 4)) Serial.println("[0x80.4] Sobretemperarura en la descarga (DOTF)");
+    if (stat0 & (1 << 3)) Serial.println("[0x80.3] Subtensión interna de bloqueo (UVLOF)");
+    if (stat0 & (1 << 2)) Serial.println("[0x80.2] Subtensión interna (UVF)");
+    if (stat0 & (1 << 1)) Serial.println("[0x80.1] Sobretensión interna de bloqueo (OVLOF)");
+    if (stat0 & (1 << 0)) Serial.println("[0x80.0] Sobretensión interna (OVF)");
 
-    // Registro 0x81 (STAT2)
-    if (stat2 & (1 << 7)) Serial.println("[0x81.7] Sobretemperatura de celda (OT)");
-    if (stat2 & (1 << 6)) Serial.println("[0x81.6] Subtemperatura de celda (UT)");
-    if (stat2 & (1 << 5)) Serial.println("[0x81.5] Sobretemperatura interna (IOT)");
-    if (stat2 & (1 << 4)) Serial.println("[0x81.4] Sobrecorriente en carga (OCC)");
-    if (stat2 & (1 << 3)) Serial.println("[0x81.3] Sobrecorriente en descarga (OCD)");
-    if (stat2 & (1 << 2)) Serial.println("[0x81.2] Cortocircuito en descarga (SCD)");
+    // Registro 0x81 (STAT1) P73 DATASHEET ISL94202
+    if (stat1 & (1 << 7)) Serial.println("[0x81.7] Voltaje de final de carga (VEOC)");
+    //[81.6] RSV
+    if (stat1 & (1 << 5)) Serial.println("[0x81.5] Circuito abierto (OWF)");
+    if (stat1 & (1 << 4)) Serial.println("[0x81.4] Fallo de celdas (CELLF)");
+    if (stat1 & (1 << 3)) Serial.println("[0x81.3] Cortocircuito en descarga (DSCF)");
+    if (stat1 & (1 << 2)) Serial.println("[0x81.2] Sobrecorriente en descarga (DOCF)");
+    if (stat1 & (1 << 1)) Serial.println("[0x81.1] Sobrecorriente en carga (COCF)");
+    if (stat1 & (1 << 0)) Serial.println("[0x81.0] Sobretemperatura interna (IOTF)");
     Serial.println("-------------------------");
+    return true;
 }
 
 bool checkEEPROMWriteReady() {
-    bool ready = true;
-    Serial.println("--- DIAGNÓSTICO PREVIO A ESCRITURA EEPROM ---");
-    //Verificar el bit EEEN (EEPROM Enable) en el registro Control 1 (0x8E, Bit 4)
-    uint8_t ctrl1;
-     readReg(0x89, ctrl1);
-    if (!(ctrl1 & (1 << 0))) {
+    uint8_t EEEN;
+    bool check = true;
+    readReg(0x89, EEEN); //P85 DATASHEET ISL94202
+    if (!(EEEN & (1 << 0))) {
+      Serial.print("Estas en modo: ");
+        switch( getMode()){
+          case 0: Serial.print("NORMAL. "); break;
+          case 1: Serial.print("IDLE. "); break;
+          case 2: Serial.print("DOZE. "); break;
+          case 3: Serial.print("SLEEP. "); break;
+          case 4: Serial.print("POWERDOWN. "); break;
+          case 5: Serial.print("UNKNOWN. "); break;
+        }
+        Serial.println("Deberías estar en modo: NORMAL");
         Serial.println("[ERROR] Bit EEEN (0x89.0) está desactivado. Habilita la escritura en RAM antes de intentar el grabado.");
-        ready = false;
-    } else {
-        Serial.println("[OK] Bit EEEN habilitado.");
-    }
+        check = false;
+    }     
+
+    //P75 DATASHEET ISL94202
     //Verificar presencia de carga o cargador en STAT0 (0x82)
-    uint8_t stat0;
-    readReg(0x82, stat0);
-    if (stat0 & (1 << 0)) { // Bit CHG_DET / PACK
+    uint8_t stat2;
+    readReg(0x82, stat2);
+    if (stat2 & (1 << 0) || stat2 & (1 << 1)) { // Bit LD_PRSNT (82.0) y CHG_PRSNT (82.1)
         Serial.println("[ERROR] Cargador/Carga detectada (0x82). Desconecta el paquete antes de grabar.");
-        ready = false;
+        check = false;
     }
-    if (ready) Serial.println("[OK] El ISL94202 cumple con todos los requisitos para grabar la EEPROM.");
-    Serial.println("");
-    return ready;
+    return check;
+}
+
+BMSMode getMode() {
+  uint8_t stat3;
+  if (!readReg(0x83, stat3)) return MODE_POWERDOWN; // sin ACK -> no responde -> Powerdown
+  if (stat3 & (1 << 6)) return MODE_SLEEP;
+  if (stat3 & (1 << 5)) return MODE_DOZE;
+  if (stat3 & (1 << 4)) return MODE_IDLE;
+  return MODE_NORMAL; // D[6:4]=000 y hubo ACK
+}
+
+bool waitForLowPowerState(uint16_t timeout_ms) {
+  uint32_t start = millis();
+  uint8_t stat2;
+  while (millis() - start < timeout_ms) {
+    if (readReg(0x82, stat2) && (stat2 & (1 << 6))) return true; // INT_SCAN=1 -> fuera de escaneo
+    delayMicroseconds(200);
+  }
+  return false;
 }
