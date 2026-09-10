@@ -3,6 +3,7 @@
 #include <math.h>
 
 BMS manager;
+unsigned long periodo = 0;
 
 void setup() {
   Serial.begin(115200); 
@@ -35,54 +36,60 @@ void setup() {
   }
   //Adapta el número de celdas. Se debe cambiar en función del uso.
   manager.setCellCount(4) ? Serial.println("Número de celdas establecido en 4.") : Serial.println("Error I2C: Fallo en el cambio del número de celdas.") ;
+  periodo = millis(); 
   delay(1000);
 }
 
 void loop() {
-  //Actualiza los atributos con las lecturas del BMS
-  if (!manager.updatePackVoltage()) Serial.println("Error I2C: Fallo en lectura de voltaje del pack.");
-  if (!manager.updateCellsVoltages()) Serial.println("Error I2C: Fallo en lectura de voltaje de las celdas.");
-  if (!manager.updateTemp()) Serial.println("Error I2C: Fallo en lectura de temperatura.");
-  manager.updatePackCurrent();
-
-  // Imprimimos en el Monitor Serie
-  Serial.println("--- DATOS BMS ---");
+  if(millis()-periodo > 2000){
+    //Actualiza los atributos con las lecturas del BMS
+    if (!manager.updatePackVoltage()) Serial.println("Error I2C: Fallo en lectura de voltaje del pack.");
+    if (!manager.updateCellsVoltages()) Serial.println("Error I2C: Fallo en lectura de voltaje de las celdas.");
+    if (!manager.updateTemp()) Serial.println("Error I2C: Fallo en lectura de temperatura.");
+    manager.updatePackCurrent();
+  }
   
-  Serial.print("Voltaje Pack: ");
-  Serial.print(manager.getPackVoltage());
-  Serial.println(" V");
-
-  Serial.print("Temp. Interna ISL: ");
-  Serial.print(manager.getTemp(0));
-  Serial.println("ºC");
-
-  Serial.print("Temp Pack (xT1): ");
-  Serial.print(manager.getTemp(1));
-  Serial.println("ºC");
-
-  Serial.print("Temp MOSFET (xT2): ");
-  Serial.print(manager.getTemp(2));
-  Serial.println("ºC");
-
-  Serial.print("Corriente: ");
-  Serial.print(manager.getPackCurrent());
-  Serial.println(" A");
-
-  for(int i = 0; i < 8; i++) {
-    Serial.print("Celda "); Serial.print(i+1); Serial.print(": ");
-    Serial.print(manager.getCellVoltage(i));
+  if(millis()-periodo > 5000){
+    // Imprimimos en el Monitor Serie
+    Serial.println("--- DATOS BMS ---");
+    
+    Serial.print("Voltaje Pack: ");
+    Serial.print(manager.getPackVoltage());
     Serial.println(" V");
+
+    Serial.print("Temp. Interna ISL: ");
+    Serial.print(manager.getTemp(0));
+    Serial.println("ºC");
+
+    Serial.print("Temp Pack (xT1): ");
+    Serial.print(manager.getTemp(1));
+    Serial.println("ºC");
+
+    Serial.print("Temp MOSFET (xT2): ");
+    Serial.print(manager.getTemp(2));
+    Serial.println("ºC");
+
+    Serial.print("Corriente: ");
+    Serial.print(manager.getPackCurrent());
+    Serial.println(" A");
+
+    for(int i = 0; i < 8; i++) {
+      Serial.print("Celda "); Serial.print(i+1); Serial.print(": ");
+      Serial.print(manager.getCellVoltage(i));
+      Serial.println(" V");
+    }
+
+  //Equilibrado forzado por MCU
+  if (!(manager.balanceCells(1, 1000) & 
+        manager.balanceCells(2, 1000) & 
+        manager.balanceCells(7, 1000) & 
+        manager.balanceCells(8, 1000))) {
+      Serial.println(" Error de equilibrado");
   }
 
-/*Equilibrado forzado por MCU
-if (!(manager.balanceCells(1, 1000) & 
-      manager.balanceCells(2, 1000) & 
-      manager.balanceCells(7, 1000) & 
-      manager.balanceCells(8, 1000))) {
-    Serial.println(" Error de equilibrado");
-}*/
-
-  Serial.println("-----------------");
-  delay(5000); 
+    Serial.println("-----------------");
+    periodo = millis(); 
+  }
+  
 }
 

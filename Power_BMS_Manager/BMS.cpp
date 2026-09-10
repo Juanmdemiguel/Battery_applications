@@ -19,7 +19,9 @@ bool BMS::oneByteWrite(uint8_t reg, uint8_t data){
   Wire.beginTransmission(ISLADDR);
   Wire.write(reg);
   Wire.write(data);
-  return Wire.endTransmission() == 0;
+  if (Wire.endTransmission() != 0) return false;
+
+  return true;
 }
 
 //Lectura genérica de un byte
@@ -155,36 +157,119 @@ if (!(n == 3 || n == 4 || n == 6 || n == 7 || n == 8)) return false;
 // 2. Se seleccionan las celdas a balancear. Registro 0x84
 // 3. Se balancean las celdas seleccionadas. Registro 0x87-D[0]. (Solo si se ha realizado el paso 1)
 bool BMS::balanceCells(uint8_t cells, int ms){
+  uint8_t mode = getMode();
+  bool check=true;
+  if(mode!=0){
+    Serial.print("Estas en modo: ");
+    switch( getMode()){
+      case 0: Serial.print("NORMAL. "); break;
+      case 1: Serial.print("IDLE. "); break;
+      case 2: Serial.print("DOZE. "); break;
+      case 3: Serial.print("SLEEP. "); break;
+      case 4: Serial.print("POWERDOWN. "); break;
+      case 5: Serial.print("UNKNOWN. "); break;
+    }
+    Serial.println("Deberías estar en modo: NORMAL");
+    Serial.println(" ");
+    check = false; 
+  }
+  if(printStatus()) check=false;
+
   uint8_t cb = 1 << (cells - 1);
 
   // Activar equilibrio por MCU
   uint8_t control2 =0; //P82 DATASHEET
-  if (!oneByteRead(0x87, control2)) return false;
+  if (!oneByteRead(0x87, control2)) {
+    Serial.println("Fallo en la lectura del registro 0x87");
+    Serial.println(" ");
+    check = false;
+  }
 
   control2 |= (1 << 5);
-  if (!oneByteWrite(0x87, control2)) return false;
+  if (!oneByteWrite(0x87, control2)) {
+    Serial.println("Fallo en la escritura del registro 0x87");
+    Serial.println(" ");
+    check = false;
+  }
 
   // Seleccionar las celdas a balancear
-  if (!oneByteWrite(0x84, cb)) return false; //P79 DATASHEET
+  if (!oneByteWrite(0x84, cb)) {
+    Serial.println("Fallo en la escritura del registro 0x84");
+    Serial.println(" ");
+    check = false;
+  } //P79 DATASHEET
 
   // CBAL_ON = 1 -> activar balanceo
   control2 |= (1 << 0);
-  if (!oneByteWrite(0x87, control2)) return false;
+  if (!oneByteWrite(0x87, control2)) {
+    Serial.println("Fallo en la escritura del registro 0x87");
+    Serial.println(" ");
+    check = false;
+  }
 
   // Mantener el balanceo durante ms
   delay(ms);
 
   // CBAL_ON = 0 -> detener balanceo
   control2 &= ~(1 << 0);
-  if (!oneByteWrite(0x87, control2)) return false; //P82 DATASHEET
+  if (!oneByteWrite(0x87, control2)) {
+    Serial.println("Fallo en la escritura del registro 0x87");
+    Serial.println(" ");
+    check = false;
+  } //P82 DATASHEET
 
-  oneByteWrite(0x84, 0x00);
+  if (!oneByteWrite(0x84, 0x00)){
+    Serial.println("Fallo en la escritura del registro 0x84");
+    Serial.println(" ");
+    check = false;
+    }
 
   // Volver al control automático
   control2 &= ~(1 << 5);
-  if (!oneByteWrite(0x87, control2)) return false;
-  return true;
+  if (!oneByteWrite(0x87, control2)) {
+    Serial.println("Fallo en la escritura del registro 0x87");
+    Serial.println(" ");
+    check = false;
+  }
+  return check;
 }
 
+//Devuelve modo de operación
+BMSMode BMS::getMode() {
+  uint8_t stat3;
+  if (!oneByteRead(0x83, stat3)) return MODE_POWERDOWN; // sin ACK -> no responde -> Powerdown
+  if (stat3 & (1 << 6)) return MODE_SLEEP;
+  if (stat3 & (1 << 5)) return MODE_DOZE;
+  if (stat3 & (1 << 4)) return MODE_IDLE;
+  return MODE_NORMAL; // D[6:4]=000 y hubo ACK
+}
 
+bool BMS::printStatus() {
+    uint8_t stat0,stat1;
+    oneByteRead(0x80,stat0);
+    oneByteRead(0x81,stat1);
 
+    if (stat0 == 0 && stat1 == 0)  return false;
+    Serial.println("--- FALLOS DETECTADOS ---");
+    // Registro 0x80 (STAT0) P71 DATASHEET ISL94202
+    if (stat0 & (1 << 7)) Serial.println("[0x80.7] Subtemperatura en carga (CUTF)");
+    if (stat0 & (1 << 6)) Serial.println("[0x80.6] Sobretemperatura en carga (COTF)");
+    if (stat0 & (1 << 5)) Serial.println("[0x80.5] Subtemperarura en la descarga (DUTF)");
+    if (stat0 & (1 << 4)) Serial.println("[0x80.4] Sobretemperarura en la descarga (DOTF)");
+    if (stat0 & (1 << 3)) Serial.println("[0x80.3] Subtensión interna de bloqueo (UVLOF)");
+    if (stat0 & (1 << 2)) Serial.println("[0x80.2] Subtensión interna (UVF)");
+    if (stat0 & (1 << 1)) Serial.println("[0x80.1] Sobretensión interna de bloqueo (OVLOF)");
+    if (stat0 & (1 << 0)) Serial.println("[0x80.0] Sobretensión interna (OVF)");
+
+    // Registro 0x81 (STAT1) P73 DATASHEET ISL94202
+    if (stat1 & (1 << 7)) Serial.println("[0x81.7] Voltaje de final de carga (VEOC)");
+    //[81.6] RSV
+    if (stat1 & (1 << 5)) Serial.println("[0x81.5] Circuito abierto (OWF)");
+    if (stat1 & (1 << 4)) Serial.println("[0x81.4] Fallo de celdas (CELLF)");
+    if (stat1 & (1 << 3)) Serial.println("[0x81.3] Cortocircuito en descarga (DSCF)");
+    if (stat1 & (1 << 2)) Serial.println("[0x81.2] Sobrecorriente en descarga (DOCF)");
+    if (stat1 & (1 << 1)) Serial.println("[0x81.1] Sobrecorriente en carga (COCF)");
+    if (stat1 & (1 << 0)) Serial.println("[0x81.0] Sobretemperatura interna (IOTF)");
+    Serial.println("-------------------------");
+    return true;
+}

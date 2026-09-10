@@ -125,7 +125,6 @@ bool checkStep(bool result, const char* stepName) {
 
 //Escritura y lectura de los registros ajenos a la EEPROM
 bool writeReg(uint8_t reg, uint8_t value){
-  //uint8_t res;
   if (reg > 0xAB) return false;
   Wire.beginTransmission(ISLADDR);
   Wire.write(reg);
