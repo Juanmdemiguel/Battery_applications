@@ -3,13 +3,12 @@
 #include "ISL94202Config.h"
 
 bool check=true; //Flag que indica consecución del código
-enum BMSMode { MODE_NORMAL, MODE_IDLE, MODE_DOZE, MODE_SLEEP, MODE_POWERDOWN, MODE_UNKNOWN };
+enum BMSMode { MODE_NORMAL, MODE_IDLE, MODE_DOZE, MODE_SLEEP, MODE_POWERDOWN, MODE_UNKNOWN }; //Define los modos de operación
 
 //Prototipos de las funciones utilizadas
 bool checkStep(bool result, const char* stepName);
 bool writeReg(uint8_t reg, uint8_t value);
 bool readReg(uint8_t reg, uint8_t &val);
-bool waitEEPROMReady(uint16_t timeout_ms = 50);
 bool writeEEPROM(uint8_t reg, uint16_t value,bool is16Bit=true);
 bool writeByteEEPROM(uint8_t addr, uint8_t data);
 bool readEEPROMPage(uint8_t base, uint8_t buffer[4]);
@@ -124,6 +123,7 @@ bool checkStep(bool result, const char* stepName) {
   } return result;
 }
 
+//Escritura y lectura de los registros ajenos a la EEPROM
 bool writeReg(uint8_t reg, uint8_t value){
   //uint8_t res;
   if (reg > 0xAB) return false;
@@ -132,30 +132,21 @@ bool writeReg(uint8_t reg, uint8_t value){
   Wire.write(value);
   if (Wire.endTransmission() != 0) return false;
   delay(5);
-  //readReg(reg, res);
-  //if (res!=value) return false;
   return true;
 }
-
 bool readReg(uint8_t ADDR, uint8_t &val){
     Wire.beginTransmission(ISLADDR);
     Wire.write(ADDR);
     if (Wire.endTransmission(false) != 0) return false; // Error en la transmisión I2C
     if (Wire.requestFrom((uint8_t)ISLADDR, (uint8_t)1) != 1) return false; // El ISL94202 no respondió con el byte solicitado  
-    val = Wire.read(); // Solo modifica 'val' si la lectura fue exitosa
-    return true;       // Lectura correcta
+    val = Wire.read(); 
+    return true;      
 }
 
-bool waitEEPROMReady(uint16_t timeout_ms) {
-    uint32_t start = millis();
-    while (millis() - start < timeout_ms) {
-        Wire.beginTransmission(ISLADDR);
-        if (Wire.endTransmission() == 0) return true; // ACK -> listo
-        delay(1);
-    }
-    return false; //Timeout
-}
-
+// Escritura y lectura de los registros de la EEPROM
+// La escritura se realiza byte a byte y el retardo se hace en la función principal (bool writeEEPROM(uint8_t reg, uint16_t value, bool is16Bit) 
+// La lectura se debe realizar de la página entera, y se incorpora en una función. Dicha función está blindada ante errores causados por ruido
+//e interferencias en el canal I2C, además de sincronizarse con secuencias en segundo plano del ISL94202. 
 bool writeByteEEPROM(uint8_t addr, uint8_t data) {
      Wire.beginTransmission(ISLADDR);
      Wire.write(addr);
@@ -166,43 +157,44 @@ bool writeByteEEPROM(uint8_t addr, uint8_t data) {
     }
     return true;
 }
-
 bool readEEPROMPage(uint8_t base, uint8_t buffer[4]) {
-    for (uint8_t i = 0; i < 4; i++) {
+    for (uint8_t i = 0; i < 4; i++) { //Cada lectura consta de 4 bytes
 
-      bool ok = false;
-      for (uint8_t attempt = 0; attempt < 3 && !ok; attempt++) {
-        waitForLowPowerState(); // única sincronización, ANTES de empezar la secuencia atómica
+      bool ok = false; //Flag error
+      for (uint8_t attempt = 0; attempt < 3 && !ok; attempt++) { //Realiza varios intentos de lectura
+        waitForLowPowerState(); // se sincroniza antes de empezar la secuencia de lectura
 
         Wire.beginTransmission(ISLADDR);
         Wire.write((uint8_t)(base + i));
         uint8_t err = Wire.endTransmission(false);
-        if (err != 0) { delay(2); continue; }
+        if (err != 0) { delay(2); continue; } //Si no se realiza conexión se intenta otra vez
 
-        if (i == 0) {
-          delay(3);
-          uint8_t n = Wire.requestFrom((uint8_t)ISLADDR, (uint8_t)1); // sin waitForLowPowerState aquí
-          if (n != 1) { delay(2); continue; }
+        if (i == 0) { //Primer byte (se realiza dos veces, uno en este if y otro en el ciclo normal)
+          delay(3); //3ms sobredimensionados (de 200μs page recall)
+          uint8_t n = Wire.requestFrom((uint8_t)ISLADDR, (uint8_t)1); 
+          if (n != 1) { delay(2); continue; } //Si el número de datos no es correcto se intenta otra vez
           Wire.read(); // descarte del recall
 
-          // reabrir dirección para el dato real - sigue siendo parte de la MISMA secuencia
+          // reabrir dirección para el dato real repetido
           Wire.beginTransmission(ISLADDR);
           Wire.write((uint8_t)(base + i));
           err = Wire.endTransmission(false);
-          if (err != 0) { delay(2); continue; }
+          if (err != 0) { delay(2); continue; } //Si no se realiza conexión se intenta otra vez
         }
 
-        uint8_t n = Wire.requestFrom((uint8_t)ISLADDR, (uint8_t)1); // sin waitForLowPowerState aquí tampoco
+        //Lectura de un byte del ciclo normal
+        uint8_t n = Wire.requestFrom((uint8_t)ISLADDR, (uint8_t)1);
         if (n != 1) { delay(2); continue; }
-        buffer[i] = Wire.read();
-        ok = true;
+        buffer[i] = Wire.read(); //Almacena
+        ok = true; 
       }
-
       if (!ok) return false;
     }
     return true;
 }
-//P148 DATASHEET ISL94202.
+
+
+//P148 DATASHEET ISL94202. Las comprobaciones por puerto serie se encuentran comentadas para reducir latencia
 bool writeEEPROM(uint8_t reg, uint16_t value, bool is16Bit) { //Funciona hasta dos bytes
     if (reg > 0x4B){ // Comprueba los límites de los registros EEPROM
     Serial.println("Fallo 1"); return false;}
@@ -524,7 +516,7 @@ bool setUp1Reg(bool CBDD, bool CBDC, bool DFODUV, bool CFODOV, bool UVLOPD, bool
 return writeEEPROM(SetUp1, code, false);
 }
 
-//Una condición para escribir en la EEPROM es la ausencia de fallos
+//Comprueba registros STATUS. actualmente inutilizada per útil en debug si hay error
 bool printFaults() {
     uint8_t stat0,stat1;
     readReg(0x80,stat0);
@@ -555,6 +547,7 @@ bool printFaults() {
     return true;
 }
 
+//Comprueba si se permite la escritura a traves del modo de operación, presencia de cargador/carga y bit enable
 bool checkEEPROMWriteReady() {
     uint8_t EEEN;
     bool check = true;
@@ -585,6 +578,7 @@ bool checkEEPROMWriteReady() {
     return check;
 }
 
+//Devuelve modo de operación
 BMSMode getMode() {
   uint8_t stat3;
   if (!readReg(0x83, stat3)) return MODE_POWERDOWN; // sin ACK -> no responde -> Powerdown
@@ -594,6 +588,7 @@ BMSMode getMode() {
   return MODE_NORMAL; // D[6:4]=000 y hubo ACK
 }
 
+//Permite obtener la ventana que no pertenece a escaneos internos, y por tanto el ISL94202 se encuentra disponible
 bool waitForLowPowerState(uint16_t timeout_ms) {
   uint32_t start = millis();
   uint8_t stat2;
