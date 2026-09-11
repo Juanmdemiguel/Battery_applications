@@ -37,6 +37,15 @@ void setup() {
   //Adapta el número de celdas. Se debe cambiar en función del uso.
   manager.setCellCount(4) ? Serial.println("Número de celdas establecido en 4.") : Serial.println("Error I2C: Fallo en el cambio del número de celdas.") ;
   periodo = millis(); 
+
+uint8_t cbfc, ctrl2, stat3;
+manager.oneByteRead(0x84, cbfc);
+manager.oneByteRead(0x87, ctrl2);
+manager.oneByteRead(0x83, stat3); // Status 3: CBUV/CBOV/CBUTF/CBOTF, P77-78
+Serial.print("0x84 CBFC: 0x"); Serial.println(cbfc, HEX);
+Serial.print("0x87 Control2: 0x"); Serial.println(ctrl2, HEX);
+Serial.print("0x83 Status3: 0x"); Serial.println(stat3, HEX);
+
   delay(1000);
 }
 
@@ -80,12 +89,12 @@ void loop() {
     }
 
   //Equilibrado forzado por MCU
-  if (!(manager.balanceCells(1, 1000) & 
+ /* if (!(manager.balanceCells(1, 1000) & 
         manager.balanceCells(2, 1000) & 
         manager.balanceCells(7, 1000) & 
         manager.balanceCells(8, 1000))) {
       Serial.println(" Error de equilibrado");
-  }
+  }*/
 
     Serial.println("-----------------");
     periodo = millis(); 

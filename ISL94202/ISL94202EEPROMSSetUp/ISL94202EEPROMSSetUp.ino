@@ -239,7 +239,7 @@ bool writeEEPROM(uint8_t reg, uint16_t value, bool is16Bit) { //Funciona hasta d
         delay(30);
     }
  // Se vuelve a realizar la lectura, para observar si se ha almacenado correctamente
-    // El primer byte recarga la página (>200µs)
+    // El primer byte recarga la página (más de 200 microsegundos)
     if (!readEEPROMPage(base, buffer)) { Serial.println("Fallo 3"); return false; }
   
     readValue = buffer[offset];

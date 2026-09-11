@@ -3,7 +3,7 @@
 
 //Dirección I2C. P141 DATASHEET ISL94202
 #define ISLADDR 0x28 //Internamente, wire.h hace 0x28<<0 || 0x28<<1
-//0x28 == 00101000. <<1 == 01010001 == 0x51. <<0 == 01010000 == 0x50 -> Only use if ADDR Pin is tied to Vss.
+//0x28 == 00101000. <<1 == 01010001 == 0x51. <<0 == 01010000 == 0x50 -> Usar solo si el pin ADDR está conectado con Vss.
 
 //OV = Over Voltage, UV = Under Voltage, EOC = End of Charge, DC = Discharge, C = Charge, OC = OverCurrent, 
 //SC = ShorCircuit, CB = Cell Balance, LP = Low Power, DS = Deep Sleep, OW = Open Wire.
