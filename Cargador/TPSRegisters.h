@@ -12,6 +12,7 @@
 #define TPS_INT_EVENT1              0x14  // Eventos de interrupción (11 bytes)
 #define TPS_INT_CLEAR1              0x18  // Escribir 1 limpia el evento en INT_EVENT1
 #define TPS_ACTIVE_PDO_CONTRACT     0x34  // PDO del contrato activo
+#define TPS_STATUS                  0x1A  // Estado no relacionado con interrupciones
 
 //------------------------Definiciones de registros. Los incluidos en el diseño se encuentran comentados --------------------//
 // Todos los registros no listados aquí son reservados: no tocar.
@@ -23,7 +24,7 @@
 //#define TPS_INT_EVENT1              0x14  // Eventos de interrupción (11 bytes)
 #define TPS_INT_MASK1               0x16  // Máscara de eventos
 //#define TPS_INT_CLEAR1              0x18  // Escribir 1 limpia el evento en INT_EVENT1
-#define TPS_STATUS                  0x1A  // Estado no relacionado con interrupciones
+//#define TPS_STATUS                  0x1A  // Estado no relacionado con interrupciones
 #define TPS_POWER_PATH_STATUS       0x26  // Estado de los switches de potencia
 #define TPS_PORT_CONFIGURATION      0x28  // Config de hardware del puerto (requiere reconexión)
 #define TPS_PORT_CONTROL            0x29  // Config de política (PR/DR swap, etc.)

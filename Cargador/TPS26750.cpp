@@ -35,69 +35,121 @@
   bool TPS26750::getContract(){ //P41 technical manual
     Wire.beginTransmission(TPSADDR);
     Wire.write(TPS_ACTIVE_PDO_CONTRACT);
-    Wire.endTransmission(false);
-    Wire.requestFrom((uint8_t)TPSADDR, (uint8_t)7); //El total del registro son 6 bytes
-    if (Wire.available() >= 7) {
-        uint8_t length = Wire.read();  // El primer byte devuelto por los chips de TI es siempre la longitud del bloque
-        if (length != 6) return false; // Error: el registro 0x34 no tiene el tamaño esperado
-        uint8_t b0 = Wire.read(); //PDO activo LSB
-        uint8_t b1 = Wire.read(); //...
-        uint8_t b2 = Wire.read(); //...
-        uint8_t b3 = Wire.read(); //PDO activo MSB
-        uint8_t b4 = Wire.read(); //Primero PDO y control
-        uint8_t b5 = Wire.read(); //Reservado y control
-        
-        uint8_t pdo_type = (b3 >> 6) & 0x03;
-        uint32_t pdo = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    if (Wire.endTransmission(false) != 0) {
+        Serial.println("[getContract] Fallo en endTransmission");
+        success = false;
+        return false;
+    }
+    Wire.requestFrom((uint8_t)TPSADDR, (uint8_t)7);
+    if (Wire.available() < 7) {
+        Serial.print("[getContract] available<7: ");
+        Serial.println(Wire.available());
+        success = false;
+        return false;
+    }
 
-        switch(pdo_type){
-          case 0: 
-            voltage = ((pdo >> 10) & 0x3FF) * 50.0f / 1000.0f; 
-            current = (pdo & 0x3FF) * 10.0f / 1000.0f; 
-            break;
-          case 1:
-            maxvoltage = ((pdo >> 20) & 0x3FF) * 50.0f / 1000.0f;
-            minvoltage = ((pdo >> 10) & 0x3FF) * 50.0f / 1000.0f;
-            maxpower = (pdo & 0x3FF) * 250.0f / 1000.0f; 
-            break;
-          case 2: 
-            maxvoltage = ((pdo >> 20) & 0x3FF) * 50.0f / 1000.0f;
-            minvoltage = ((pdo >> 10) & 0x3FF) * 50.0f / 1000.0f;
-            current = (pdo & 0x3FF) * 10.0f / 1000.0f;             
-          break; 
-          case 3: 
-            maxvoltage = ((pdo >> 17) & 0xFF) * 100.0f / 1000.0f; 
-            minvoltage = ((pdo >> 8) & 0xFF) * 100.0f / 1000.0f;
-            current = (pdo & 0x7F) * 50.0f / 1000.0f;               
-          break;
-          default: return false; break; 
-        }
-        success = true;
-    } else success = false;
+    uint8_t length = Wire.read();
+    if (length != 6) {
+        Serial.print("[getContract] length inesperada: ");
+        Serial.println(length);
+        success = false;
+        return false;
+    }
+    uint8_t b0 = Wire.read();
+    uint8_t b1 = Wire.read();
+    uint8_t b2 = Wire.read();
+    uint8_t b3 = Wire.read();
+    uint8_t b4 = Wire.read();
+    uint8_t b5 = Wire.read();
 
+    uint8_t pdo_type = (b3 >> 6) & 0x03;
+    uint32_t pdo = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+
+    Serial.print("[getContract] pdo_type=");
+    Serial.print(pdo_type);
+    Serial.print(" raw=0x");
+    Serial.println(pdo, HEX);
+
+    switch(pdo_type){
+      case 0: // Fixed Voltage
+        voltage = ((pdo >> 10) & 0x3FF) * 50.0f / 1000.0f;
+        current = (pdo & 0x3FF) * 10.0f / 1000.0f;
+        Serial.print("[getContract] Fixed -> V=");
+        Serial.print(voltage);
+        Serial.print("V I=");
+        Serial.print(current);
+        Serial.println("A");
+        break;
+      case 1: // Battery
+        maxvoltage = ((pdo >> 20) & 0x3FF) * 50.0f / 1000.0f;
+        minvoltage = ((pdo >> 10) & 0x3FF) * 50.0f / 1000.0f;
+        maxpower = (pdo & 0x3FF) * 250.0f / 1000.0f;
+        Serial.print("[getContract] Battery -> Vmax=");
+        Serial.print(maxvoltage);
+        Serial.print(" Vmin=");
+        Serial.print(minvoltage);
+        Serial.print(" Pmax=");
+        Serial.println(maxpower);
+        break;
+      case 2: // Variable
+        maxvoltage = ((pdo >> 20) & 0x3FF) * 50.0f / 1000.0f;
+        minvoltage = ((pdo >> 10) & 0x3FF) * 50.0f / 1000.0f;
+        current = (pdo & 0x3FF) * 10.0f / 1000.0f;
+        Serial.print("[getContract] Variable -> Vmax=");
+        Serial.print(maxvoltage);
+        Serial.print(" Vmin=");
+        Serial.print(minvoltage);
+        Serial.print(" I=");
+        Serial.println(current);
+        break;
+      case 3: // APDO (PPS/AVS - tu caso con SPR hasta 120W probablemente cae aquí)
+        maxvoltage = ((pdo >> 17) & 0xFF) * 100.0f / 1000.0f;
+        minvoltage = ((pdo >> 8) & 0xFF) * 100.0f / 1000.0f;
+        current = (pdo & 0x7F) * 50.0f / 1000.0f;
+        Serial.print("[getContract] APDO -> Vmax=");
+        Serial.print(maxvoltage);
+        Serial.print(" Vmin=");
+        Serial.print(minvoltage);
+        Serial.print(" I=");
+        Serial.println(current);
+        break;
+      default:
+        Serial.println("[getContract] pdo_type desconocido");
+        success = false;
+        return false;
+    }
+    success = true;
     return true;
-  }
+}
 
 //--------------------------Registros TPS Block Transfer--------------------------------------------//
 /* TPS25750 Host Interface Technical Reference Manual P11
 Se observa en la figura 1-3 que el primer byte leido es (byte count), por lo que la lectura del TPS 
 se diferencia de la lectura general por I2C y permite lectura de nbytes. 
 Siglas de la figura == S: Start, Sr: Repeated Start, Wr: Write, Rd: Read, A: Acknowledge, P: Stop*/
-  bool TPSnBytesRead(uint8_t DEVADDR, uint8_t REGADDR, uint8_t* data, uint8_t n) {
-      Wire.beginTransmission(DEVADDR);
-      Wire.write(REGADDR);
-      Wire.endTransmission(false);
-      Wire.requestFrom((uint8_t)DEVADDR, (uint8_t)(n+1));
-      if (Wire.available()<1) return false;
-        uint8_t actualLen = Wire.read(); // Leemos el byte de longitud devuelto por el chip
-        if (actualLen == 0 || actualLen > n) return false; 
-        for (uint8_t i = 0; i < actualLen; i++) {
-            if (Wire.available()) data[i] = Wire.read();
-            else return false;
-        }
-    return true;
-    }
+  bool TPS26750::TPSnBytesRead(uint8_t DEVADDR, uint8_t REGADDR, uint8_t* data, uint8_t n) {
+    Wire.beginTransmission(DEVADDR);
+    Wire.write(REGADDR);
+   uint8_t endStatus = Wire.endTransmission(false);
+    uint8_t received = Wire.requestFrom((uint8_t)DEVADDR, (uint8_t)(n+1));
+   /*  Serial.print("[TPSnBytesRead] REG=0x"); Serial.print(REGADDR, HEX);
+    Serial.print(" endStatus="); Serial.print(endStatus);
+    Serial.print(" requested="); Serial.print(n+1);
+    Serial.print(" received="); Serial.println(received);*/
 
+    if (Wire.available()<1) {
+        Serial.println("[TPSnBytesRead] available<1, abortando");
+        return false;
+    }
+    uint8_t actualLen = Wire.read();
+   // Serial.print("[TPSnBytesRead] actualLen="); Serial.println(actualLen);
+    if (actualLen == 0 || actualLen > n) return false; 
+    for (uint8_t i = 0; i < actualLen; i++) {
+        if (Wire.available()) data[i] = Wire.read();
+        else return false;
+    }
+    return true;
+}
   bool TPS26750::TPSnBytesWrite(uint8_t DEVADDR, uint8_t REGADDR, const uint8_t* data, uint8_t n) {
     Wire.beginTransmission(DEVADDR);
     Wire.write(REGADDR);
@@ -153,9 +205,9 @@ El funcionamiento se encuentra detallado en el host manual. Los pasos son los si
 }
 
 bool TPS26750::waitReadyForPatch(uint32_t timeoutMs) {
-    // TRM P52: 1.The device generates an I2C interrupt, INT_EVENT.ReadyForPatch, indicating that it’s ready for patch. The
+    // TRM P52: 1.The device generates an I2C interrupt, INT_EVENT.ReadyForPatch, indicating that it is ready for patch. The
     //host shall start the patch download process only after receiving this notification from the device.
-    //(bit ReadyForPatch, INT_EVENT1 byte 11 / bit1 — ver Tabla 2-6/2-7, pág. 19)
+    //(bit ReadyForPatch, INT_EVENT1 byte 11 / bit1. Ver Tabla 2-6 / 2-7, pág. 19)
     uint8_t events[11];
     uint32_t start = millis(); //Tiempo desde que comienza el programa (Similar getTick())
     while (millis() - start < timeoutMs) {
@@ -176,7 +228,9 @@ bool TPS26750::waitForMode(const char* targetMode, uint32_t timeoutMs) {
     uint8_t mode[4];
     uint32_t start = millis();
     do {
-        if (!TPSnBytesRead(TPSADDR, TPS_MODE, mode, 4)) return false;
+        if (!TPSnBytesRead(TPSADDR, TPS_MODE, mode, 4)) {
+            Serial.println("Fallo lectura MODE");
+        } 
         if (memcmp(mode, targetMode, 4) == 0) return true;
         delay(5);
     } while (millis() - start < timeoutMs);
@@ -193,13 +247,18 @@ bool TPS26750::loadConfig() {
 
     // Si MODE está en modo "APP" no hace falta parchear. Si esta en modo PTCH se continua
   if (!waitForMode("APP ", 50)) {   
-        if (!waitForMode("PTCH", 2000)) return false; 
+        if (!waitForMode("PTCH", 2000)) {
+          Serial.println("ERROR: No se ha entrado en modo PTCH");
+          return false; }
   } else return true; // ya esta en modo APP termina. 
 
 
   uint32_t patchSize = PATCH_SIZE;
   // El TPS debe mandar la señal "Ready for Patch". 
-  if (!waitReadyForPatch(2000)) return false;
+  if (!waitReadyForPatch(2000)){
+    Serial.println("ERROR: No se ha obtenido Ready for Patch");
+    return false;
+  } 
 
   // Se inicia la transacción PBM. P48. Tabla 3-9 "INPUT DATAX".
   // Los parámetros de PBM se deben enviar como input de un comando 4cc. 
@@ -210,19 +269,31 @@ bool TPS26750::loadConfig() {
   pbms_params[1] = ((patchSize >> 8) & 0xFF);
   pbms_params[2] = ((patchSize >> 16) & 0xFF);
   pbms_params[3] = ((patchSize >> 24) & 0xFF);
-  //Byte 5: i2c adress for downloading patch
+  //Byte 5: dirección I2C para descargar el patch
   pbms_params[4] = PATCH_I2C_ADDR; 
-  //Byte 6: Burst mode timeout
+  //Byte 6: "Burst mode timeout"
   pbms_params[5] = 0x32;           
-  if (!TPSnBytesWrite(TPSADDR, TPS_DATA1, pbms_params, 6)) return false;
-  if (!sendCommand4CC("PBMs")) return false;
+  if (!TPSnBytesWrite(TPSADDR, TPS_DATA1, pbms_params, 6)) {
+    Serial.println("ERROR: No se han enviado los parámetros data1");
+    return false;
+    }
+  if (!sendCommand4CC("PBMs")){
+    Serial.println("ERROR: No se ha n emviado los parámetros pbms");
+    return false;
+  } 
 
-  // Se puede leer el resultado del patch directamente del directorio DATA. Solo tiene 1 byte
+  // Se puede leer el resultado del patch directamente del directorio DATA. 
+  // El contenido relevante solo tiene 1 byte, pero la lectura debe hacerse de 64 para leer todo el contenido
   // Tabla 3-9 "OUTPUT DATAX".
-  uint8_t pbmsStatus;
-  if (!TPSnBytesRead(TPSADDR, TPS_DATA1, &pbmsStatus, 1)) return false;
+  uint8_t dataBuf[65] = {0};
+if (!TPSnBytesRead(TPSADDR, TPS_DATA1, dataBuf, 64)) {  
+    Serial.println("ERROR: Fallo en lectura de parámetros");
+    return false;
+}
+uint8_t pbmsStatus = dataBuf[0]; //Se coge la información de interés
   if (pbmsStatus != PBMS_SUCCESS) {
       sendCommand4CC("PBMe");
+      Serial.println("ERROR: No se ha comenzado la configuración");
       return false;
   }
 
@@ -231,7 +302,7 @@ bool TPS26750::loadConfig() {
   const uint8_t blockSize = 64;
   uint8_t chunkBuffer[blockSize];
 
-  while (bytesSent < patchSize) {
+  while (bytesSent < patchSize) { //Mientras no se haya mandado el patch entero
       uint8_t currentChunkSize = min((uint32_t)blockSize, patchSize - bytesSent);
       memcpy_P(chunkBuffer, &tps_patch_data[bytesSent], currentChunkSize);
 
@@ -239,6 +310,7 @@ bool TPS26750::loadConfig() {
       Wire.write(chunkBuffer, currentChunkSize);
       if (Wire.endTransmission() != 0) {
           sendCommand4CC("PBMe");
+          Serial.println("ERROR: carga de datos incorrecta");
           return false;
       }
       bytesSent += currentChunkSize;
@@ -246,22 +318,59 @@ bool TPS26750::loadConfig() {
   }
 
   // Se indica que se ha terminado de cargar los datos. P49-51. Tabla 3-10.
-  if (!sendCommand4CC("PBMc")) return false;
+  if (!sendCommand4CC("PBMc")) {
+    Serial.println("ERROR: Fallo en indicación de final");
+    return false;}
 
   // Se comprueba el resultado de PBMc: DevicePatchCompleteStatus (Byte3) y
   // AppConfigPatchCompleteStatus (Byte4). P50. Tabla 3-10.
   uint8_t pbmcOut[4];
-  if (TPSnBytesRead(TPSADDR, TPS_DATA1, pbmcOut, 4)) {
-      uint8_t devicePatchStatus = pbmcOut[2]; // 0x00 = éxito
-      uint8_t appConfigStatus   = pbmcOut[3]; // 0x00 = éxito
+  if (!TPSnBytesRead(TPSADDR, TPS_DATA1, pbmcOut, 4)) 
+    Serial.println("Fallo al leer estado PBMc (posible reset del chip en curso)");
+  else{ //Gestión de errores. 0x00 confirma el éxito en ambos registros
+      uint8_t devicePatchStatus = pbmcOut[2]; 
+      uint8_t appConfigStatus   = pbmcOut[3]; 
+      //Si no se cumple, informa del error
       if (devicePatchStatus != 0x00 || appConfigStatus != 0x00) {
           Serial.print("Error de Patch status: "); Serial.println(devicePatchStatus);
-          Serial.print("Error de Comfig status: "); Serial.println(appConfigStatus);
+          Serial.print("Error de Config status: "); Serial.println(appConfigStatus);
           // Diagnóstico: 0x41 mismatch cabecera, 0x42 ROM incompatible,
           // 0x43 mismatch checksum código, 0x44/0x45 patch nulo/erróneo (Tabla 3-10)
           return false;
       }
   }
-  // El TPS debe cambiar a modo "APP".
-  return waitForMode("APP ", 200);
+  // El TPS debe cambiar a modo "APP". Si no, el protocolo ha fallado.
+  return waitForMode("APP ", 2000);
+}
+
+bool TPS26750::getStatus() {
+    uint8_t buf[6] = {0}; 
+    if (!TPSnBytesRead(TPSADDR, TPS_STATUS, buf, sizeof(buf))) {
+        Serial.println("[getStatus] Fallo leyendo TPS_STATUS");
+        return false;
+    }
+
+    //Indica todo el contenido de status, y facilita la lectura de los dos primeros bytes. 
+    //Permite ver en binario información básico y correcto estado de la memoria reservada, para discernir si se lee ruido
+    Serial.print("[getStatus] raw = ");
+    for (uint8_t i = 0; i < sizeof(buf); i++) {
+        if (buf[i] < 0x10) Serial.print("0");
+        Serial.print(buf[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.println();
+
+    Serial.print("[getStatus] bits byte0 = ");
+    for (int8_t bit = 7; bit >= 0; bit--) {
+        Serial.print((buf[0] >> bit) & 0x01);
+    }
+    Serial.println();
+
+    Serial.print("[getStatus] bits byte1 = ");
+    for (int8_t bit = 7; bit >= 0; bit--) {
+        Serial.print((buf[1] >> bit) & 0x01);
+    }
+    Serial.println();
+
+    return true;
 }

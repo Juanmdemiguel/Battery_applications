@@ -19,6 +19,7 @@ class TPS26750 {
     float gecurrent(){return current;}
     float getmaxpower(){return maxpower;}
     bool getsuccess(){return success;}
+    bool getStatus();
 
   //Acciones
     bool TPSnBytesRead(uint8_t DEVADDR, uint8_t REGADDR, uint8_t* data, uint8_t n);
